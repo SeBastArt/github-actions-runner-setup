@@ -109,8 +109,14 @@ jobs:
           echo "Checking ARC Controller status..."
           kubectl get pods -n actions-runner-system
           
-          echo "Checking Runner Scale Set..."
-          kubectl get runnerscalesets -n actions-runner-system
+          echo "Checking AutoscalingRunnerSet (new ARC API)..."
+          kubectl get autoscalingrunnerset -n actions-runner-system || echo "No AutoscalingRunnerSet found"
+          
+          echo "Checking EphemeralRunnerSet..."
+          kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found"
+          
+          echo "Checking all custom resources..."
+          kubectl api-resources | grep actions || echo "ARC CRDs not found"
           
           echo "Checking events for any issues..."
           kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' | tail -10

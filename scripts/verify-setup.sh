@@ -48,11 +48,17 @@ fi
 
 # Check if runner scale set exists
 print_info "Checking Runner Scale Set..."
-SCALE_SET_EXISTS=$(kubectl get runnerscalesets -n actions-runner-system --no-headers 2>/dev/null | wc -l || echo "0")
+SCALE_SET_EXISTS=$(kubectl get autoscalingrunnerset -n actions-runner-system --no-headers 2>/dev/null | wc -l || echo "0")
 if [ "$SCALE_SET_EXISTS" -gt 0 ]; then
-    print_status 0 "Runner Scale Set exists ($SCALE_SET_EXISTS scale sets configured)"
+    print_status 0 "AutoscalingRunnerSet exists ($SCALE_SET_EXISTS scale sets configured)"
 else
-    print_warning "No runner scale set found - this might be normal if no jobs are queued"
+    # Try alternative resource names
+    EPHEMERAL_EXISTS=$(kubectl get ephemeralrunnerset -n actions-runner-system --no-headers 2>/dev/null | wc -l || echo "0")
+    if [ "$EPHEMERAL_EXISTS" -gt 0 ]; then
+        print_status 0 "EphemeralRunnerSet exists ($EPHEMERAL_EXISTS runner sets configured)"
+    else
+        print_warning "No runner scale sets found - this might be normal if no jobs are queued"
+    fi
 fi
 
 # Check node architecture
@@ -74,7 +80,8 @@ fi
 
 # Show current runner status
 print_info "Current runner status:"
-kubectl get runnerscalesets -n actions-runner-system 2>/dev/null || echo "No runner scale sets currently active"
+kubectl get autoscalingrunnerset -n actions-runner-system 2>/dev/null || echo "No AutoscalingRunnerSet currently active"
+kubectl get ephemeralrunnerset -n actions-runner-system 2>/dev/null || echo "No EphemeralRunnerSet currently active"
 kubectl get runners -n actions-runner-system 2>/dev/null || echo "No individual runners currently active"
 
 echo ""
