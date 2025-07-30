@@ -1,5 +1,5 @@
 # GitHub Actions Runner Scale Set Values
-# ARC v0.12+ Compatible - NO Docker (back to containerd)
+# ARC v0.12+ Compatible - WITH Docker-in-Docker for container builds
 
 githubConfigUrl: https://github.com/wondering-developer
 githubConfigSecret:
@@ -16,42 +16,127 @@ runnerScaleSetName: "arm64-runners"
 # NOTE: runnerLabels are NOT supported in ARC v0.12+
 # Runners automatically get: self-hosted, linux, ARM64 based on runtime detection
 
-# Template for ARM64 runners (back to basic containerd setup)
+# Template for ARM64 runners with Docker-in-Docker
 template:
   spec:
     # CRITICAL: This nodeSelector ensures ARM64 placement and triggers ARM64 label
     nodeSelector:
       kubernetes.io/arch: arm64
     
+    # Init container to install Docker CLI and tools
+    initContainers:
+      - name: install-container-tools
+        image: ubuntu:22.04
+        command: ["/bin/bash"]
+        args:
+          - -c
+          - |
+            echo "🔧 Installing container build tools for ARM64..."
+            apt-get update
+            apt-get install -y curl apt-transport-https ca-certificates gnupg lsb-release
+            
+            # Install Docker CLI (client only - daemon runs in sidecar)
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo "deb [arch=arm64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+            apt-get update
+            apt-get install -y docker-ce-cli docker-buildx-plugin
+            
+            # Install kubectl and helm for ARM64
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl"
+            chmod +x kubectl
+            mv kubectl /shared-tools/
+            
+            curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+            chmod 700 get_helm.sh
+            HELM_INSTALL_DIR=/shared-tools ./get_helm.sh --no-sudo
+            
+            # Copy Docker CLI to shared tools
+            cp /usr/bin/docker /shared-tools/
+            cp -r /usr/libexec/docker /shared-tools/ || true
+            
+            echo "✅ Container tools installed successfully"
+        
+        volumeMounts:
+          - name: shared-tools
+            mountPath: /shared-tools
+        
+        securityContext:
+          runAsUser: 0  # Root for package installation
+    
     containers:
-    - name: runner
-      image: ghcr.io/actions/actions-runner:latest
-      command: ["/home/runner/run.sh"]
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        
+        # Resource configuration
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        
+        # Environment variables for container builds
+        env:
+          - name: RUNNER_TOOL_CACHE
+            value: "/opt/hostedtoolcache"
+          - name: PATH
+            value: "/shared-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          - name: DOCKER_HOST
+            value: "tcp://localhost:2376"
+          - name: DOCKER_TLS_VERIFY
+            value: "1"
+          - name: DOCKER_CERT_PATH
+            value: "/certs/client"
+        
+        # Volume mounts
+        volumeMounts:
+          - name: tool-cache
+            mountPath: /opt/hostedtoolcache
+          - name: shared-tools
+            mountPath: /shared-tools
+          - name: docker-certs
+            mountPath: /certs
       
-      # Resource configuration
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "256Mi"
-        limits:
-          cpu: "2000m"
-          memory: "4Gi"
-      
-      # Environment variables (NO Docker)
-      env:
-      - name: RUNNER_TOOL_CACHE
-        value: "/opt/hostedtoolcache"
-      
-      # Volume mounts
-      volumeMounts:
-      - name: tool-cache
-        mountPath: /opt/hostedtoolcache
+      # Docker-in-Docker sidecar container for ARM64
+      - name: docker-dind
+        image: docker:24-dind
+        env:
+          - name: DOCKER_TLS_CERTDIR
+            value: "/certs"
+          - name: DOCKER_DRIVER
+            value: "overlay2"
+        
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        
+        volumeMounts:
+          - name: docker-certs
+            mountPath: /certs
+          - name: docker-storage
+            mountPath: /var/lib/docker
     
     # Volumes
     volumes:
-    - name: tool-cache
-      emptyDir: {}
-      
+      - name: tool-cache
+        emptyDir: {}
+      - name: shared-tools
+        emptyDir: {}
+      - name: docker-certs
+        emptyDir: {}
+      - name: docker-storage
+        emptyDir: {}
+    
     restartPolicy: Never
     
     # Security context

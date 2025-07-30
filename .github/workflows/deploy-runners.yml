@@ -112,7 +112,7 @@ jobs:
       - name: Deploy Runner Scale Set (Organization-Level)
         run: |
           # Organization-level runners for all repositories
-          # NOTE: No Docker-in-Docker for containerd compatibility
+          # WITH Docker-in-Docker for container builds
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
