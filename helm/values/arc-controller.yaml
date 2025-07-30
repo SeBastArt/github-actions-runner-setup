@@ -1,0 +1,60 @@
+# ARC Controller values ohne cert-manager
+# Für Kubernetes Cluster ohne cert-manager
+
+# Cert-Manager komplett deaktivieren
+certManager:
+  enabled: false
+
+# Admission Webhooks deaktivieren (brauchen cert-manager)
+admissionWebhooks:
+  enabled: false
+
+controller:
+  admissionWebhooks:
+    enabled: false
+
+# Webhook Konfiguration
+webhook:
+  certManager:
+    enabled: false
+  tls:
+    enabled: false
+
+# Metrics reduzieren
+metrics:
+  controllerManagerAddr: ""
+  enableAdditionalMetrics: false
+
+# Logging
+logLevel: info
+logFormat: text
+
+# Image Konfiguration
+image:
+  repository: ghcr.io/actions/actions-runner-controller
+  tag: ""  # Uses chart appVersion
+  pullPolicy: IfNotPresent
+
+# Resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node Selector für ARM64
+nodeSelector:
+  kubernetes.io/arch: arm64
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
