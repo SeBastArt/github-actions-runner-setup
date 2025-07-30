@@ -103,16 +103,9 @@ jobs:
             --wait \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 
-      - name: Wait for ARC Controller to be ready
-        run: |
-          kubectl wait --namespace actions-runner-system \
-            --for=condition=ready pod \
-            --selector=app.kubernetes.io/name=actions-runner-controller \
-            --timeout=300s
-
       - name: Deploy Runner Scale Set (OCI Registry)
         run: |
-          helm install github-runners \
+          helm install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
             --set githubConfigUrl="${{ secrets.CONFIG_URL }}" \
