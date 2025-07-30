@@ -26,7 +26,8 @@ on:
 
 env:
   HELM_VERSION: "3.13.0"
-  ARC_VERSION: "0.9.3"  # GitHub-unterstützte Version (OCI Registry)
+  # Using latest ARC version for best compatibility and features
+  ARC_VERSION: "0.12.1"
 
 jobs:
   deploy-arc:
@@ -111,27 +112,36 @@ jobs:
             --namespace actions-runner-system \
             --create-namespace \
             --values ./helm/values/organization-runners.yaml \
-            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
-            --set maxRunners="${{ github.event.inputs.runner_replicas || '5' }}" \
+            --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
+            --set-string githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
+            --set maxRunners=${{ github.event.inputs.runner_replicas || 5 }} \
+            --set minRunners=1 \
             --wait \
+            --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
       - name: Verify deployment
         run: |
-          echo "Checking ARC Controller status..."
+          echo "🔍 Checking ARC Controller status..."
           kubectl get pods -n actions-runner-system
           
-          echo "Checking AutoscalingRunnerSet (new ARC API)..."
-          kubectl get autoscalingrunnerset -n actions-runner-system || echo "No AutoscalingRunnerSet found"
+          echo "📊 Checking AutoscalingRunnerSet (ARC v0.12+ API)..."
+          kubectl get autoscalingrunnerset -n actions-runner-system -o wide || echo "No AutoscalingRunnerSet found yet"
           
-          echo "Checking EphemeralRunnerSet..."
-          kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found"
+          echo "🔍 Checking EphemeralRunnerSet..."
+          kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found yet"
           
-          echo "Checking all custom resources..."
+          echo "📋 Checking Helm release status..."
+          helm status org-arm64-runners -n actions-runner-system
+          
+          echo "🔧 Checking all custom resources..."
           kubectl api-resources | grep actions || echo "ARC CRDs not found"
           
-          echo "Checking events for any issues..."
+          echo "📝 Checking recent events for any issues..."
           kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' | tail -10
+          
+          echo "⚡ Waiting for runner pods to be ready..."
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=gha-runner-scale-set -n actions-runner-system --timeout=300s || echo "Timeout waiting for runner pods"
 
       - name: Run setup verification
         run: |
