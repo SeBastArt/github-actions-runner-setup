@@ -85,7 +85,10 @@ jobs:
           # Wait for cleanup
           sleep 10
           
-          # Clean up old resources
+          # Clean up old resources and remove finalizers if stuck
+          kubectl patch autoscalingrunnerset arm64-runners -n actions-runner-system \
+            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet found"
+          
           kubectl delete autoscalingrunnerset arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet found"
 
       - name: Login to GitHub Container Registry
@@ -112,6 +115,10 @@ jobs:
             --set maxRunners="${{ github.event.inputs.runner_replicas || '5' }}" \
             --set minRunners="1" \
             --set runnerGroup="default" \
+            --set runnerLabels[0]="self-hosted" \
+            --set runnerLabels[1]="linux" \
+            --set runnerLabels[2]="ARM64" \
+            --set runnerLabels[3]="arm64-runners" \
             --set template.spec.nodeSelector."kubernetes\.io/arch"=arm64 \
             --wait \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
