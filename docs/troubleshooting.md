@@ -19,8 +19,8 @@ kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-c
 curl -H "Authorization: token ghp_..." https://api.github.com/user
 
 # 3. Prüfe Runner Scale Set
-kubectl get runners -n actions-runner-system
-kubectl describe runners -n actions-runner-system
+kubectl get runnerscalesets -n actions-runner-system
+kubectl describe runnerscalesets -n actions-runner-system
 ```
 
 **Häufige Fixes:**
@@ -169,6 +169,7 @@ helm upgrade --install github-runners actions-runner-controller/gha-runner-scale
 # Müssen mit runnerLabels in values.yaml übereinstimmen
 
 # 2. Keine verfügbaren Runner
+kubectl get runnerscalesets -n actions-runner-system
 kubectl get runners -n actions-runner-system
 
 # 3. Runner Scale Set Limits
@@ -216,6 +217,8 @@ kubectl top nodes
 kubectl top pods -n actions-runner-system
 
 # Custom Resources
+kubectl get runnerscalesets -n actions-runner-system -o yaml
+kubectl describe runnerscalesets -n actions-runner-system
 kubectl get runners -n actions-runner-system -o yaml
 kubectl describe runners -n actions-runner-system
 

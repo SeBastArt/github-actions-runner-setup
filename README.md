@@ -1,11 +1,11 @@
 # GitHub Actions Runner Setup for ARM64 Kubernetes
 
-This repository contains the setup for deploying GitHub Actions Runner Controller (ARC) on ARM64 Kubernetes clusters.
+This repository contains the setup for deploying **GitHub's official Actions Runner Controller (ARC)** on ARM64 Kubernetes clusters using the new OCI registry charts.
 
 ## Architecture
 
 ```
-GitHub → GitHub App → ARC Controller → ARM64 Runner Pods
+GitHub → Personal Access Token → ARC Controller → ARM64 Runner Pods
 ```
 
 ## Features

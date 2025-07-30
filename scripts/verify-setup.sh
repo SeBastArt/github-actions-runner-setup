@@ -48,9 +48,9 @@ fi
 
 # Check if runner scale set exists
 print_info "Checking Runner Scale Set..."
-SCALE_SET_EXISTS=$(kubectl get runners -n actions-runner-system --no-headers 2>/dev/null | wc -l || echo "0")
+SCALE_SET_EXISTS=$(kubectl get runnerscalesets -n actions-runner-system --no-headers 2>/dev/null | wc -l || echo "0")
 if [ "$SCALE_SET_EXISTS" -gt 0 ]; then
-    print_status 0 "Runner Scale Set exists ($SCALE_SET_EXISTS runners configured)"
+    print_status 0 "Runner Scale Set exists ($SCALE_SET_EXISTS scale sets configured)"
 else
     print_warning "No runner scale set found - this might be normal if no jobs are queued"
 fi
@@ -74,7 +74,8 @@ fi
 
 # Show current runner status
 print_info "Current runner status:"
-kubectl get runners -n actions-runner-system 2>/dev/null || echo "No runners currently active"
+kubectl get runnerscalesets -n actions-runner-system 2>/dev/null || echo "No runner scale sets currently active"
+kubectl get runners -n actions-runner-system 2>/dev/null || echo "No individual runners currently active"
 
 echo ""
 print_info "Setup verification completed!"

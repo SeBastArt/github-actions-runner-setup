@@ -1,0 +1,91 @@
+# GitHub Actions Runner Controller Values
+# Für die neue GitHub-unterstützte Version (OCI Registry)
+
+# GitHub Konfiguration
+githubConfigUrl: ""  # Wird via --set gesetzt
+githubConfigSecret:
+  github_token: ""   # Wird via --set gesetzt
+
+# Runner Scale Set Konfiguration
+runnerScaleSetName: "arm64-runners"
+
+# Runner Template für ARM64
+template:
+  spec:
+    # ARM64 Node Selector
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    
+    # Tolerations für ARM64 (falls nötig)
+    tolerations:
+    - key: "kubernetes.io/arch"
+      operator: "Equal"
+      value: "arm64"
+      effect: "NoSchedule"
+    
+    # Container Konfiguration
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:latest
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "2000m"
+          memory: "4Gi"
+      
+      # Environment für ARM64 Optimierung  
+      env:
+      - name: RUNNER_TOOL_CACHE
+        value: /opt/hostedtoolcache
+      - name: DOCKER_HOST
+        value: unix:///var/run/docker.sock
+      - name: RUNNER_ARCH
+        value: arm64
+      
+      # Volume Mounts für Docker
+      volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+        readOnly: false
+      - name: tool-cache
+        mountPath: /opt/hostedtoolcache
+    
+    # Volumes
+    volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
+        type: Socket
+    - name: tool-cache
+      emptyDir: {}
+    
+    # Security Context
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 121
+      fsGroup: 121
+
+# Scaling Konfiguration
+minRunners: 0
+maxRunners: 5
+
+# Runner Labels
+runnerLabels:
+- "self-hosted"
+- "linux"
+- "ARM64"
+- "arm64-runners"
+
+# Listener Template (neue API)
+listenerTemplate:
+  spec:
+    containers:
+    - name: listener
+      securityContext:
+        runAsUser: 1000
+
+# Controller Manager Template (neue API)
+controllerServiceAccount:
+  namespace: actions-runner-system

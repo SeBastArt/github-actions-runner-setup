@@ -26,7 +26,7 @@ on:
 
 env:
   HELM_VERSION: "3.13.0"
-  ARC_VERSION: "0.9.3"  # Neuere Version mit cert-manager Support
+  ARC_VERSION: "0.9.3"  # GitHub-unterstützte Version (OCI Registry)
 
 jobs:
   deploy-arc:
@@ -77,20 +77,15 @@ jobs:
             --selector=app.kubernetes.io/name=cert-manager \
             --timeout=300s
 
-      - name: Add GitHub Actions Runner Controller Helm repo
+      - name: Install ARC Controller (GitHub-unterstützt)
         run: |
-          helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
-          helm repo update
-
-      - name: Install/Upgrade ARC Controller
-        run: |
-          helm upgrade --install arc \
+          helm install arc \
             --namespace actions-runner-system \
             --create-namespace \
             --version ${{ env.ARC_VERSION }} \
             --set nodeSelector."kubernetes\.io/arch"=arm64 \
             --wait \
-            actions-runner-controller/actions-runner-controller
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 
       - name: Wait for ARC Controller to be ready
         run: |
@@ -99,18 +94,22 @@ jobs:
             --selector=app.kubernetes.io/name=actions-runner-controller \
             --timeout=300s
 
-      - name: Deploy Runner Scale Set
+      - name: Deploy Runner Scale Set (GitHub-unterstützt)
         run: |
-          helm upgrade --install github-runners \
+          helm install github-runners \
             --namespace actions-runner-system \
+            --create-namespace \
             --version ${{ env.ARC_VERSION }} \
+            --set githubConfigUrl="${{ secrets.CONFIG_URL }}" \
+            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
+            --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}" \
+            --set template.spec.nodeSelector."kubernetes\.io/arch"=arm64 \
+            --set template.spec.containers[0].resources.requests.cpu="100m" \
+            --set template.spec.containers[0].resources.requests.memory="256Mi" \
+            --set template.spec.containers[0].resources.limits.cpu="2000m" \
+            --set template.spec.containers[0].resources.limits.memory="4Gi" \
             --wait \
-            actions-runner-controller/gha-runner-scale-set \
-            --values ./helm/values/base-values.yaml \
-            --values ./helm/values/${{ github.event.inputs.environment || 'production' }}.yaml \
-            --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
-            --set-string githubConfigUrl="${{ secrets.CONFIG_URL }}" \
-            --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}"
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
       - name: Verify deployment
         run: |
@@ -118,7 +117,7 @@ jobs:
           kubectl get pods -n actions-runner-system
           
           echo "Checking Runner Scale Set..."
-          kubectl get runners -n actions-runner-system
+          kubectl get runnerscalesets -n actions-runner-system
           
           echo "Checking events for any issues..."
           kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' | tail -10

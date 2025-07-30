@@ -111,22 +111,32 @@ remove_helm_releases() {
 remove_custom_resources() {
     print_header "Removing custom resources..."
     
-    # Remove runners
+    # Remove RunnerScaleSets (neue API)
+    if kubectl get runnerscalesets -n $NAMESPACE > /dev/null 2>&1; then
+        kubectl delete runnerscalesets --all -n $NAMESPACE || true
+    fi
+    
+    # Remove Runners (falls noch vorhanden)
     if kubectl get runners -n $NAMESPACE > /dev/null 2>&1; then
         kubectl delete runners --all -n $NAMESPACE || true
     fi
     
-    # Remove horizontal runner autoscalers
+    # Remove AutoscalingRunnerSets (neue API)
+    if kubectl get autoscalingrunnerset -n $NAMESPACE > /dev/null 2>&1; then
+        kubectl delete autoscalingrunnerset --all -n $NAMESPACE || true
+    fi
+    
+    # Legacy: horizontal runner autoscalers
     if kubectl get hra -n $NAMESPACE > /dev/null 2>&1; then
         kubectl delete hra --all -n $NAMESPACE || true
     fi
     
-    # Remove runner deployments
+    # Legacy: runner deployments
     if kubectl get runnerdeployments -n $NAMESPACE > /dev/null 2>&1; then
         kubectl delete runnerdeployments --all -n $NAMESPACE || true
     fi
     
-    # Remove runner replica sets
+    # Legacy: runner replica sets
     if kubectl get runnerreplicasets -n $NAMESPACE > /dev/null 2>&1; then
         kubectl delete runnerreplicasets --all -n $NAMESPACE || true
     fi
@@ -186,8 +196,8 @@ remove_crds() {
     read -p "Do you want to remove CRDs? This affects other ARC installations too! (y/N): " -r
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Remove ARC CRDs
-        kubectl get crd -o name | grep -E "(actions\.summerwind\.dev|actions\.github\.com)" | xargs -r kubectl delete || true
+        # Remove neue GitHub ARC CRDs
+        kubectl get crd -o name | grep -E "(actions\.github\.com|actions\.summerwind\.dev)" | xargs -r kubectl delete || true
         print_success "CRDs removed"
     else
         print_warning "CRDs left in place"
