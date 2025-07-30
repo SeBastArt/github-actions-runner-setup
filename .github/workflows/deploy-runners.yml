@@ -26,7 +26,7 @@ on:
 
 env:
   HELM_VERSION: "3.13.0"
-  ARC_VERSION: "0.6.1"
+  ARC_VERSION: "0.9.3"  # Aktualisiert für neuere Kubernetes Versionen
 
 jobs:
   deploy-arc:
@@ -67,7 +67,7 @@ jobs:
           helm upgrade --install arc \
             --namespace actions-runner-system \
             --create-namespace \
-            --version ${{ env.ARC_VERSION }} \
+            --wait \
             actions-runner-controller/actions-runner-controller
 
       - name: Wait for ARC Controller to be ready
@@ -81,8 +81,8 @@ jobs:
         run: |
           helm upgrade --install github-runners \
             --namespace actions-runner-system \
-            --version ${{ env.ARC_VERSION }} \
-            actions-runner-controller/actions-runner-controller-charts/gha-runner-scale-set \
+            --wait \
+            actions-runner-controller/gha-runner-scale-set \
             --values ./helm/values/base-values.yaml \
             --values ./helm/values/${{ github.event.inputs.environment || 'production' }}.yaml \
             --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
