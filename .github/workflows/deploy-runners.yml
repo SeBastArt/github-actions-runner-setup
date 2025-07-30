@@ -111,11 +111,8 @@ jobs:
             --set githubConfigUrl="${{ secrets.CONFIG_URL }}" \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}" \
+            --set minRunners="0" \
             --set template.spec.nodeSelector."kubernetes\.io/arch"=arm64 \
-            --set template.spec.containers[0].resources.requests.cpu="100m" \
-            --set template.spec.containers[0].resources.requests.memory="256Mi" \
-            --set template.spec.containers[0].resources.limits.cpu="2000m" \
-            --set template.spec.containers[0].resources.limits.memory="4Gi" \
             --wait \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
