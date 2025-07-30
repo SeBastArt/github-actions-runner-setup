@@ -67,7 +67,7 @@ jobs:
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager \
             --create-namespace \
-            --set installCRDs=true \
+            --set crds.enabled=true \
             --set nodeSelector."kubernetes\.io/arch"=arm64 \
             --wait
           
@@ -77,15 +77,21 @@ jobs:
             --selector=app.kubernetes.io/name=cert-manager \
             --timeout=300s
 
+      - name: Add GitHub ARC Helm Repository
+        run: |
+          helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
+          helm repo update
+
       - name: Install ARC Controller (GitHub-unterstützt)
         run: |
           helm install arc \
             --namespace actions-runner-system \
             --create-namespace \
-            --version ${{ env.ARC_VERSION }} \
+            --set authSecret.create=true \
+            --set authSecret.github_token="${{ secrets.TOKEN }}" \
             --set nodeSelector."kubernetes\.io/arch"=arm64 \
             --wait \
-            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+            actions-runner-controller/actions-runner-controller
 
       - name: Wait for ARC Controller to be ready
         run: |
@@ -99,7 +105,6 @@ jobs:
           helm install github-runners \
             --namespace actions-runner-system \
             --create-namespace \
-            --version ${{ env.ARC_VERSION }} \
             --set githubConfigUrl="${{ secrets.CONFIG_URL }}" \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}" \
@@ -109,7 +114,7 @@ jobs:
             --set template.spec.containers[0].resources.limits.cpu="2000m" \
             --set template.spec.containers[0].resources.limits.memory="4Gi" \
             --wait \
-            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+            actions-runner-controller/gha-runner-scale-set
 
       - name: Verify deployment
         run: |
