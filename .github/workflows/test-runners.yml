@@ -22,7 +22,8 @@ on:
 
 jobs:
   test-runner-connectivity:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY (no label arrays)
+    runs-on: arm64-runners
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     
     steps:
@@ -45,7 +46,8 @@ jobs:
           df -h / || echo "df command not available"
 
   test-docker:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'docker' || github.event.inputs.test_type == 'full')
     needs: test-runner-connectivity
     
@@ -78,7 +80,8 @@ jobs:
           fi
 
   test-kubernetes-access:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'helm' || github.event.inputs.test_type == 'full')
     needs: test-runner-connectivity
     
@@ -105,7 +108,8 @@ jobs:
           fi
 
   test-checkout-and-build:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     needs: test-runner-connectivity
     
@@ -135,7 +139,8 @@ jobs:
           echo "RUNNER_ARCH: $RUNNER_ARCH"
 
   test-network-connectivity:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     needs: test-runner-connectivity
     
@@ -155,7 +160,8 @@ jobs:
           curl -I https://registry.hub.docker.com || echo "Docker Hub not reachable"
 
   test-performance:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && github.event.inputs.test_type == 'full'
     needs: test-runner-connectivity
     
@@ -179,7 +185,8 @@ jobs:
           rm -f /tmp/test-io
 
   test-summary:
-    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    # ARC v0.12+ targeting: Use installation name ONLY
+    runs-on: arm64-runners
     needs: [test-runner-connectivity, test-checkout-and-build, test-network-connectivity]
     if: always()
     
@@ -211,6 +218,6 @@ jobs:
           echo "🎉 ARM64 self-hosted runner is ready for your private repositories!"
           echo ""
           echo "Next steps:"
-          echo "1. Update your private repository workflows to use: runs-on: [self-hosted, linux, ARM64, arm64-runners]"
+          echo "1. Update your private repository workflows to use: runs-on: arm64-runners"
           echo "2. Remove QEMU and buildx setup from Docker builds"
           echo "3. Enjoy faster, native ARM64 builds! 🚀"

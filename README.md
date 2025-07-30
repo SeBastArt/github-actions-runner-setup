@@ -15,13 +15,34 @@ GitHub → Personal Access Token → ARC Controller → ARM64 Runner Pods
 - ✅ Ephemeral security (runners destroyed after each job)
 - ✅ Infrastructure as Code with Helm
 - ✅ Support for private repositories
+- ✅ **ARC v0.12+ Compatible** (installation name targeting)
 
 ## Quick Start
 
 1. Create Personal Access Token (see [docs/pat-setup.md](./docs/pat-setup.md))
 2. Configure repository secrets: TOKEN, CONFIG_URL, KUBECONFIG
 3. Run the deployment workflow
-4. Test with a private repository
+4. Test with a private repository using `runs-on: arm64-runners`
+
+## **CRITICAL: ARC v0.12+ Breaking Changes**
+
+**⚠️ IMPORTANT**: ARC v0.12+ does **NOT** support custom `runnerLabels`. 
+
+### ❌ OLD Syntax (WILL NOT WORK):
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+```
+
+### ✅ NEW Syntax (ARC v0.12+ ONLY):
+```yaml
+jobs:
+  build:
+    runs-on: arm64-runners  # Use installation name directly
+```
+
+**Why**: GitHub removed custom labels support in ARC v0.12+. Runners are now targeted by **installation name only**. Automatic labels (self-hosted, linux, ARM64) are still applied based on runtime detection.
 
 ## Security Model
 

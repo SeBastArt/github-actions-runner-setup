@@ -80,17 +80,21 @@ jobs:
 
       - name: Clean up old repository-level runners
         run: |
-          # Remove old repository-level runners
+          # Remove ALL old installations (different naming conventions)
           helm uninstall arm64-runners --namespace actions-runner-system || echo "No old arm64-runners found"
+          helm uninstall org-arm64-runners --namespace actions-runner-system || echo "No old org-arm64-runners found"
           
           # Wait for cleanup
           sleep 10
           
           # Clean up old resources and remove finalizers if stuck
           kubectl patch autoscalingrunnerset arm64-runners -n actions-runner-system \
-            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet found"
+            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet arm64-runners found"
+          kubectl patch autoscalingrunnerset org-arm64-runners -n actions-runner-system \
+            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet org-arm64-runners found"
           
-          kubectl delete autoscalingrunnerset arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet found"
+          kubectl delete autoscalingrunnerset arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet arm64-runners found"
+          kubectl delete autoscalingrunnerset org-arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet org-arm64-runners found"
 
       - name: Login to GitHub Container Registry
         run: |
@@ -108,7 +112,8 @@ jobs:
       - name: Deploy Runner Scale Set (Organization-Level)
         run: |
           # Organization-level runners for all repositories
-          helm upgrade --install org-arm64-runners \
+          # NOTE: No runnerLabels - ARC v0.12+ uses installation name targeting only
+          helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
             --values ./helm/values/organization-runners.yaml \
@@ -117,10 +122,6 @@ jobs:
             --set maxRunners=${{ github.event.inputs.runner_replicas || 5 }} \
             --set minRunners=1 \
             --set-string runnerGroup="default" \
-            --set runnerLabels[0]="self-hosted" \
-            --set runnerLabels[1]="linux" \
-            --set runnerLabels[2]="ARM64" \
-            --set runnerLabels[3]="arm64-runners" \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -133,19 +134,26 @@ jobs:
           echo "📊 Checking AutoscalingRunnerSet (ARC v0.12+ API)..."
           kubectl get autoscalingrunnerset -n actions-runner-system -o wide || echo "No AutoscalingRunnerSet found yet"
           
-          echo "🏷️ CRITICAL: Checking Runner Labels..."
-          kubectl get autoscalingrunnerset org-arm64-runners -n actions-runner-system -o jsonpath='{.spec.runnerLabels}' || echo "No runnerLabels found in spec"
+          echo "🎯 CRITICAL: Checking Runner Installation Name (NEW targeting method)..."
+          kubectl get autoscalingrunnerset arm64-runners -n actions-runner-system -o jsonpath='{.metadata.name}' || echo "arm64-runners installation not found"
           echo ""
-          kubectl get autoscalingrunnerset org-arm64-runners -n actions-runner-system -o yaml | grep -A10 -B2 runnerLabels || echo "runnerLabels not found in YAML"
+          echo "Installation details:"
+          kubectl get autoscalingrunnerset arm64-runners -n actions-runner-system -o yaml | grep -E "name:|runnerScaleSetName:" || echo "Installation details not available"
+          
+          echo "🏗️ Automatic Labels (ARC v0.12+ generates these based on runtime):"
+          echo "  - self-hosted (automatic)"
+          echo "  - linux (from OS detection)"
+          echo "  - ARM64 (from nodeSelector: kubernetes.io/arch=arm64)"
+          echo "  - arm64-runners (installation name for targeting)"
           
           echo "🔍 Checking EphemeralRunnerSet..."
           kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found yet"
           
           echo "📋 Checking Helm release status..."
-          helm status org-arm64-runners -n actions-runner-system
+          helm status arm64-runners -n actions-runner-system
           
-          echo "📋 Checking Helm values (including runnerLabels)..."
-          helm get values org-arm64-runners -n actions-runner-system
+          echo "📋 Checking Helm values (no runnerLabels in v0.12+)..."
+          helm get values arm64-runners -n actions-runner-system
           
           echo "🔧 Checking all custom resources..."
           kubectl api-resources | grep actions || echo "ARC CRDs not found"
