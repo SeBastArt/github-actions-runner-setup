@@ -77,26 +77,13 @@ jobs:
             --selector=app.kubernetes.io/name=cert-manager \
             --timeout=300s
 
-      - name: Clean up existing ARC installation
-        run: |
-          # Remove existing Helm releases if they exist
-          helm uninstall arc --namespace actions-runner-system || echo "No arc release found"
-          helm uninstall github-runners --namespace actions-runner-system || echo "No github-runners release found"
-          
-          # Wait a moment for cleanup
-          sleep 10
-          
-          # Clean up any remaining resources
-          kubectl delete runnerscalesets --all -n actions-runner-system || echo "No runnerscalesets found"
-          kubectl delete runners --all -n actions-runner-system || echo "No runners found"
-
       - name: Login to GitHub Container Registry
         run: |
           echo "${{ secrets.TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
 
       - name: Install ARC Controller (OCI Registry)
         run: |
-          helm install arc \
+          helm upgrade --install arc \
             --namespace actions-runner-system \
             --create-namespace \
             --set nodeSelector."kubernetes\.io/arch"=arm64 \
@@ -105,7 +92,8 @@ jobs:
 
       - name: Deploy Runner Scale Set (OCI Registry)
         run: |
-          helm install arm64-runners \
+          # Use helm upgrade --install to avoid name conflicts
+          helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
             --set githubConfigUrl="${{ secrets.CONFIG_URL }}" \
