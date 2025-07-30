@@ -112,7 +112,7 @@ jobs:
       - name: Deploy Runner Scale Set (Organization-Level)
         run: |
           # Organization-level runners for all repositories
-          # NOTE: No runnerLabels - ARC v0.12+ uses installation name targeting only
+          # NOTE: No Docker-in-Docker for containerd compatibility
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \

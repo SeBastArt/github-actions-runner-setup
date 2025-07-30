@@ -1,5 +1,5 @@
 # GitHub Actions Runner Scale Set Values
-# ARC v0.12+ Compatible - NO custom runnerLabels support
+# ARC v0.12+ Compatible - NO Docker-in-Docker (for containerd clusters)
 
 githubConfigUrl: https://github.com/wondering-developer
 githubConfigSecret:
@@ -16,7 +16,7 @@ runnerScaleSetName: "arm64-runners"
 # NOTE: runnerLabels are NOT supported in ARC v0.12+
 # Runners automatically get: self-hosted, linux, ARM64 based on runtime detection
 
-# Template for ARM64 runners
+# Template for ARM64 runners (containerd compatible)
 template:
   spec:
     # CRITICAL: This nodeSelector ensures ARM64 placement and triggers ARM64 label
@@ -37,27 +37,19 @@ template:
           cpu: "2000m"
           memory: "4Gi"
       
-      # Environment variables
+      # Environment variables (NO Docker socket)
       env:
       - name: RUNNER_TOOL_CACHE
         value: "/opt/hostedtoolcache"
-      - name: DOCKER_HOST
-        value: "unix:///var/run/docker.sock"
+      # REMOVED: DOCKER_HOST (causes mount issues)
       
-      # Volume mounts for Docker-in-Docker
+      # Volume mounts (NO Docker socket)
       volumeMounts:
-      - name: docker-sock
-        mountPath: /var/run/docker.sock
-        readOnly: false
       - name: tool-cache
         mountPath: /opt/hostedtoolcache
     
-    # Volumes
+    # Volumes (NO Docker socket mount)
     volumes:
-    - name: docker-sock
-      hostPath:
-        path: /var/run/docker.sock
-        type: Socket
     - name: tool-cache
       emptyDir: {}
       
