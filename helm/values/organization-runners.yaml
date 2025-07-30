@@ -1,0 +1,31 @@
+# GitHub Actions Runner Scale Set Values
+# For Organization-Level Runners
+
+githubConfigUrl: https://github.com/wondering-developer
+githubConfigSecret:
+  github_token: ""  # Will be set via --set
+
+# Runner configuration
+runnerGroup: default
+maxRunners: 5
+minRunners: 1
+
+# Runner Labels
+runnerLabels:
+  - self-hosted
+  - linux
+  - ARM64
+  - arm64-runners
+
+# Template for ARM64 runners
+template:
+  spec:
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:latest
+      command: ["/home/runner/run.sh"]
+      
+    restartPolicy: Never

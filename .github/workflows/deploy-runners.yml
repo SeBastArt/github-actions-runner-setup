@@ -110,16 +110,9 @@ jobs:
           helm upgrade --install org-arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
-            --set githubConfigUrl="https://github.com/wondering-developer" \
+            --values ./helm/values/organization-runners.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set maxRunners="${{ github.event.inputs.runner_replicas || '5' }}" \
-            --set minRunners="1" \
-            --set runnerGroup="default" \
-            --set runnerLabels[0]="self-hosted" \
-            --set runnerLabels[1]="linux" \
-            --set runnerLabels[2]="ARM64" \
-            --set runnerLabels[3]="arm64-runners" \
-            --set template.spec.nodeSelector."kubernetes\.io/arch"=arm64 \
             --wait \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
