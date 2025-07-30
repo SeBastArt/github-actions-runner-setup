@@ -62,11 +62,13 @@ jobs:
           helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
           helm repo update
 
-      - name: Install/Upgrade ARC Controller
+      - name: Install/Upgrade ARC Controller (Istio-ready)
         run: |
           helm upgrade --install arc \
             --namespace actions-runner-system \
             --create-namespace \
+            --set controller.webhook.tls.enabled=false \
+            --set controller.webhook.service.type=ClusterIP \
             --wait \
             actions-runner-controller/actions-runner-controller
 
