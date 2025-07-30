@@ -162,11 +162,21 @@ helm upgrade --install github-runners actions-runner-controller/gha-runner-scale
 - Workflow startet nicht
 - "Waiting for a runner to pick up this job"
 
-**Mögliche Ursachen:**
+**🚨 HÄUFIGSTE URSACHE: Runner Visibility Settings**
+
+**Problem**: Runner ist online, aber für Public/Private Repos nicht freigegeben.
+
+**✅ LÖSUNG**:
+1. **GitHub Organization** → **Settings** → **Actions** → **Runners**
+2. **Klicke auf deinen Runner** (z.B. `arm64-runners`)
+3. **Repository access** → **Selected repositories** oder **All repositories**
+4. **Oder**: **Runner visibility** → ✅ **Public repositories** + ✅ **Private repositories**
+
+**Andere mögliche Ursachen:**
 ```bash
-# 1. Runner Labels stimmen nicht überein
-# In Workflow: runs-on: [self-hosted, linux, ARM64, arm64-runners]
-# Müssen mit runnerLabels in values.yaml übereinstimmen
+# 1. Runner Labels stimmen nicht überein (ARC v0.12+ uses installation names)
+# FALSCH: runs-on: [self-hosted, linux, ARM64, arm64-runners] 
+# RICHTIG: runs-on: arm64-runners
 
 # 2. Keine verfügbaren Runner
 kubectl get runnerscalesets -n actions-runner-system

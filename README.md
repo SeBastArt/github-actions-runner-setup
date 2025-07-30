@@ -17,7 +17,17 @@ GitHub → Personal Access Token → ARC Controller → ARM64 Runner Pods
 - ✅ Support for private repositories
 - ✅ **ARC v0.12+ Compatible** (installation name targeting)
 
-## Quick Start
+## **CRITICAL: GitHub Organization Runner Visibility**
+
+**⚠️ IMPORTANT**: After deployment, check GitHub Organization Settings!
+
+**GitHub Settings** → **Actions** → **Runners** → **Runner Settings**:
+- ✅ Enable **"Private repositories"** (usually enabled by default)
+- ✅ Enable **"Public repositories"** (usually DISABLED by default)
+
+**Without this setting**: Workflows in public repositories will show "No runner found" even though the runner is online.
+
+**Quick Start**
 
 1. Create Personal Access Token (see [docs/pat-setup.md](./docs/pat-setup.md))
 2. Configure repository secrets: TOKEN, CONFIG_URL, KUBECONFIG
