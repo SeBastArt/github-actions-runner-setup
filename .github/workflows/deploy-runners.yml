@@ -1,0 +1,106 @@
+name: Deploy GitHub Actions Runners
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      runner_replicas:
+        description: 'Number of runner replicas'
+        required: true
+        default: '2'
+        type: string
+      
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+      - '.github/workflows/deploy-runners.yml'
+
+env:
+  HELM_VERSION: "3.13.0"
+  ARC_VERSION: "0.6.1"
+
+jobs:
+  deploy-arc:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Add GitHub Actions Runner Controller Helm repo
+        run: |
+          helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
+          helm repo update
+
+      - name: Install/Upgrade ARC Controller
+        run: |
+          helm upgrade --install arc \
+            --namespace actions-runner-system \
+            --create-namespace \
+            --version ${{ env.ARC_VERSION }} \
+            actions-runner-controller/actions-runner-controller
+
+      - name: Wait for ARC Controller to be ready
+        run: |
+          kubectl wait --namespace actions-runner-system \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/name=actions-runner-controller \
+            --timeout=300s
+
+      - name: Deploy Runner Scale Set
+        run: |
+          helm upgrade --install github-runners \
+            --namespace actions-runner-system \
+            --version ${{ env.ARC_VERSION }} \
+            actions-runner-controller/actions-runner-controller-charts/gha-runner-scale-set \
+            --values ./helm/values/base-values.yaml \
+            --values ./helm/values/${{ github.event.inputs.environment || 'production' }}.yaml \
+            --set-string githubConfigSecret.github_token="${{ secrets.GITHUB_TOKEN }}" \
+            --set-string githubConfigUrl="${{ secrets.GITHUB_CONFIG_URL }}" \
+            --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}"
+
+      - name: Verify deployment
+        run: |
+          echo "Checking ARC Controller status..."
+          kubectl get pods -n actions-runner-system
+          
+          echo "Checking Runner Scale Set..."
+          kubectl get runners -n actions-runner-system
+          
+          echo "Checking events for any issues..."
+          kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' | tail -10
+
+      - name: Run setup verification
+        run: |
+          chmod +x ./scripts/verify-setup.sh
+          ./scripts/verify-setup.sh

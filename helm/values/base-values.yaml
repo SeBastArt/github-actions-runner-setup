@@ -1,0 +1,100 @@
+# Base configuration for GitHub Actions Runner Controller
+# Optimized for ARM64 Kubernetes clusters
+
+# GitHub configuration for Personal Access Token
+# This will be set via --set-string in the workflow
+githubConfigUrl: ""
+
+# For PAT authentication (not GitHub App)
+# The token will be provided via secret
+githubConfigSecret:
+  github_token: ""
+
+# Runner configuration
+runnerScaleSetName: "arm64-runners"
+
+# Labels for runner identification
+runnerLabels:
+  - "self-hosted"
+  - "linux" 
+  - "ARM64"
+  - "arm64-runners"
+
+# Template for the runner pods
+template:
+  spec:
+    # ARM64 node selector
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    
+    # Resource requests and limits
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:latest
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "2000m"
+          memory: "4Gi"
+      
+      # Environment variables for ARM64 optimization
+      env:
+      - name: RUNNER_TOOL_CACHE
+        value: /opt/hostedtoolcache
+      - name: DOCKER_HOST
+        value: unix:///var/run/docker.sock
+      
+      # Volume mounts
+      volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+        readOnly: false
+      - name: tool-cache
+        mountPath: /opt/hostedtoolcache
+    
+    # Volumes
+    volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
+        type: Socket
+    - name: tool-cache
+      emptyDir: {}
+    
+    # Tolerations for ARM64 nodes (if needed)
+    tolerations: []
+    
+    # Pod security context
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 121
+      fsGroup: 121
+
+# Autoscaling configuration
+minRunners: 0
+maxRunners: 5
+
+# Scaling behavior
+scaleDownDelaySecondsAfterScaleOut: 300
+scaleDownFactor: 0.5
+scaleUpTrigger:
+  githubEvent:
+    - check_run
+    - pull_request
+  duration: "1m"
+
+# Pod cleanup
+podCleanupTimeout: 600
+
+# Logging
+log:
+  level: info
+  format: text
+
+# Metrics (optional)
+metrics:
+  enabled: true
+  port: 8080
+  path: /metrics

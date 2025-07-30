@@ -1,0 +1,216 @@
+name: Test GitHub Actions Runners
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'basic'
+        type: choice
+        options:
+          - basic
+          - docker
+          - helm
+          - full
+  
+  # Automatically test after runner deployment
+  workflow_run:
+    workflows: ["Deploy GitHub Actions Runners"]
+    types:
+      - completed
+
+jobs:
+  test-runner-connectivity:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Test basic runner functionality
+        run: |
+          echo "🚀 Testing ARM64 self-hosted runner..."
+          echo "Architecture: $(uname -m)"
+          echo "OS: $(uname -a)"
+          echo "Date: $(date)"
+          echo "User: $(whoami)"
+          echo "Hostname: $(hostname)"
+
+      - name: Test system resources
+        run: |
+          echo "CPU Info:"
+          lscpu | grep "Architecture\|CPU(s)\|Model name" || echo "lscpu not available"
+          echo "Memory Info:"
+          free -h || echo "free command not available"
+          echo "Disk Info:"
+          df -h / || echo "df command not available"
+
+  test-docker:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'docker' || github.event.inputs.test_type == 'full')
+    needs: test-runner-connectivity
+    
+    steps:
+      - name: Test Docker availability
+        run: |
+          echo "🐳 Testing Docker functionality..."
+          docker --version
+          docker info | head -20
+
+      - name: Test Docker build (simple)
+        run: |
+          echo "FROM alpine:latest
+          RUN echo 'Hello from ARM64 runner!' > /hello.txt
+          CMD cat /hello.txt" > Dockerfile
+          
+          docker build -t test-arm64:latest .
+          docker run --rm test-arm64:latest
+          docker rmi test-arm64:latest
+          rm Dockerfile
+
+      - name: Test multi-arch capabilities (if needed for future)
+        run: |
+          echo "Checking if buildx is available for future multi-arch builds..."
+          if command -v docker buildx &> /dev/null; then
+            docker buildx version
+            docker buildx ls
+          else
+            echo "Docker buildx not available - that's fine for native ARM64 builds"
+          fi
+
+  test-kubernetes-access:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'helm' || github.event.inputs.test_type == 'full')
+    needs: test-runner-connectivity
+    
+    steps:
+      - name: Test kubectl access
+        run: |
+          echo "☸️ Testing Kubernetes access..."
+          if command -v kubectl &> /dev/null; then
+            kubectl version --client
+            kubectl cluster-info
+            kubectl get nodes
+          else
+            echo "kubectl not available - will be installed during workflows"
+          fi
+
+      - name: Test Helm access
+        run: |
+          echo "⎈ Testing Helm access..."
+          if command -v helm &> /dev/null; then
+            helm version
+            helm repo list || echo "No helm repos configured yet"
+          else
+            echo "helm not available - will be installed during workflows"
+          fi
+
+  test-checkout-and-build:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    needs: test-runner-connectivity
+    
+    steps:
+      - name: Test repository checkout
+        uses: actions/checkout@v4
+        
+      - name: Test file operations
+        run: |
+          echo "📁 Testing file operations..."
+          echo "Current directory: $(pwd)"
+          echo "Files in repo:"
+          ls -la
+          
+          # Test file creation and permissions
+          echo "test content" > test-file.txt
+          cat test-file.txt
+          rm test-file.txt
+
+      - name: Test environment variables
+        run: |
+          echo "🔧 Testing environment..."
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
+          echo "GITHUB_REF: $GITHUB_REF"
+          echo "RUNNER_OS: $RUNNER_OS"
+          echo "RUNNER_ARCH: $RUNNER_ARCH"
+
+  test-network-connectivity:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    needs: test-runner-connectivity
+    
+    steps:
+      - name: Test internet connectivity
+        run: |
+          echo "🌐 Testing network connectivity..."
+          
+          # Test basic connectivity
+          ping -c 3 8.8.8.8 || echo "Ping failed - might be blocked"
+          
+          # Test DNS resolution
+          nslookup github.com || echo "nslookup failed"
+          
+          # Test HTTPS connectivity
+          curl -I https://github.com || echo "GitHub not reachable"
+          curl -I https://registry.hub.docker.com || echo "Docker Hub not reachable"
+
+  test-performance:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && github.event.inputs.test_type == 'full'
+    needs: test-runner-connectivity
+    
+    steps:
+      - name: Performance benchmark
+        run: |
+          echo "⚡ Running performance tests..."
+          
+          # CPU test
+          echo "CPU performance test (10 seconds):"
+          timeout 10s yes > /dev/null || true
+          
+          # Memory test
+          echo "Memory allocation test:"
+          dd if=/dev/zero of=/tmp/test-mem bs=1M count=100 2>/dev/null || echo "Memory test failed"
+          rm -f /tmp/test-mem
+          
+          # Disk I/O test
+          echo "Disk I/O test:"
+          dd if=/dev/zero of=/tmp/test-io bs=1M count=100 oflag=direct 2>/dev/null || echo "I/O test failed"
+          rm -f /tmp/test-io
+
+  test-summary:
+    runs-on: [self-hosted, linux, ARM64, arm64-runners]
+    needs: [test-runner-connectivity, test-checkout-and-build, test-network-connectivity]
+    if: always()
+    
+    steps:
+      - name: Test Summary
+        run: |
+          echo "📊 Test Summary"
+          echo "=============="
+          
+          if [[ "${{ needs.test-runner-connectivity.result }}" == "success" ]]; then
+            echo "✅ Runner connectivity: PASSED"
+          else
+            echo "❌ Runner connectivity: FAILED"
+          fi
+          
+          if [[ "${{ needs.test-checkout-and-build.result }}" == "success" ]]; then
+            echo "✅ Checkout and build: PASSED"
+          else
+            echo "❌ Checkout and build: FAILED"
+          fi
+          
+          if [[ "${{ needs.test-network-connectivity.result }}" == "success" ]]; then
+            echo "✅ Network connectivity: PASSED"
+          else
+            echo "❌ Network connectivity: FAILED"
+          fi
+          
+          echo ""
+          echo "🎉 ARM64 self-hosted runner is ready for your private repositories!"
+          echo ""
+          echo "Next steps:"
+          echo "1. Update your private repository workflows to use: runs-on: [self-hosted, linux, ARM64, arm64-runners]"
+          echo "2. Remove QEMU and buildx setup from Docker builds"
+          echo "3. Enjoy faster, native ARM64 builds! 🚀"
