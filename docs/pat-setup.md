@@ -45,8 +45,8 @@ In deinem **öffentlichen** runner-deployment Repository:
 
 ```bash
 # GitHub Authentication
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_CONFIG_URL=https://github.com/dein-username
+TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+CONFIG_URL=https://github.com/dein-username
 
 # Kubernetes Cluster Access  
 KUBECONFIG=<base64-encoded-kubeconfig>
@@ -70,7 +70,7 @@ Du hast zwei Optionen für die `GITHUB_CONFIG_URL`:
 
 ### Option A: User-weite Runner (Empfohlen)
 ```bash
-GITHUB_CONFIG_URL=https://github.com/dein-username
+CONFIG_URL=https://github.com/dein-username
 ```
 - Runner sind für **alle** deine Repositories verfügbar
 - Einfacher zu verwalten
@@ -78,7 +78,7 @@ GITHUB_CONFIG_URL=https://github.com/dein-username
 
 ### Option B: Repository-spezifische Runner
 ```bash  
-GITHUB_CONFIG_URL=https://github.com/dein-username/weatherstation
+CONFIG_URL=https://github.com/dein-username/weatherstation
 ```
 - Runner nur für ein spezifisches Repository
 - Mehr Sicherheit, aber mehr Aufwand
@@ -145,8 +145,8 @@ Da PATs ablaufen, solltest du:
 
 ### "Bad credentials" Fehler:
 ```bash
-# Token prüfen
-curl -H "Authorization: token ghp_xxxx" https://api.github.com/user
+# Token prüfen (ersetze mit deinem echten Token)
+curl -H "Authorization: token ghp_..." https://api.github.com/repos/dein-username/github-actions-runner-setup
 ```
 
 ### Runner erscheint nicht:
@@ -158,7 +158,7 @@ kubectl logs -n actions-runner-system -l app=github-runner
 ### Permission denied:
 - Prüfe Token Scopes
 - Prüfe ob Token noch gültig ist
-- Prüfe GITHUB_CONFIG_URL
+- Prüfe CONFIG_URL
 
 ## 9. Monitoring
 

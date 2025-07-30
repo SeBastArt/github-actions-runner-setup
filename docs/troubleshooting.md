@@ -15,8 +15,8 @@
 kubectl get pods -n actions-runner-system
 kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller
 
-# 2. Prüfe GitHub Token
-curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+# 2. Prüfe GitHub Token (ersetze mit deinem echten Token)
+curl -H "Authorization: token ghp_..." https://api.github.com/user
 
 # 3. Prüfe Runner Scale Set
 kubectl get runners -n actions-runner-system
@@ -25,7 +25,7 @@ kubectl describe runners -n actions-runner-system
 
 **Häufige Fixes:**
 - Token abgelaufen → Neuen PAT erstellen
-- Falsche GITHUB_CONFIG_URL → Prüfe URL Format
+- Falsche CONFIG_URL → Prüfe URL Format
 - Fehlende Permissions → Prüfe Token Scopes
 
 ### 2. Authentication Fehler
@@ -37,14 +37,14 @@ Error: Bad credentials
 
 **Lösung:**
 ```bash
-# 1. Token testen
-curl -H "Authorization: token ghp_xxxx" https://api.github.com/user
+# 1. Token testen (ersetze mit deinem echten Token)
+curl -H "Authorization: token ghp_..." https://api.github.com/user
 
 # 2. Token Scopes prüfen
-curl -H "Authorization: token ghp_xxxx" https://api.github.com/user/repos
+curl -H "Authorization: token ghp_..." https://api.github.com/user/repos
 
 # 3. Secret prüfen (im GitHub Repo)
-# Settings → Secrets → GITHUB_TOKEN sollte korrekt sein
+# Settings → Secrets → TOKEN sollte korrekt sein
 ```
 
 ### 3. Pods starten nicht

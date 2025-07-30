@@ -85,8 +85,8 @@ jobs:
             actions-runner-controller/actions-runner-controller-charts/gha-runner-scale-set \
             --values ./helm/values/base-values.yaml \
             --values ./helm/values/${{ github.event.inputs.environment || 'production' }}.yaml \
-            --set-string githubConfigSecret.github_token="${{ secrets.GITHUB_TOKEN }}" \
-            --set-string githubConfigUrl="${{ secrets.GITHUB_CONFIG_URL }}" \
+            --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
+            --set-string githubConfigUrl="${{ secrets.CONFIG_URL }}" \
             --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}"
 
       - name: Verify deployment

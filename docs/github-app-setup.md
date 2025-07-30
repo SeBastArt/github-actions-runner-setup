@@ -82,8 +82,8 @@ GITHUB_CONFIG_URL=https://github.com/your-organization/your-repo
 ### 3. Configure Repository Secrets
 
 ```bash
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_CONFIG_URL=https://github.com/your-organization
+TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+CONFIG_URL=https://github.com/your-organization
 ```
 
 ## Cluster Configuration

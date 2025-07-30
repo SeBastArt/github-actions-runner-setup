@@ -18,16 +18,16 @@ GitHub → GitHub App → ARC Controller → ARM64 Runner Pods
 
 ## Quick Start
 
-1. Create GitHub App (see [docs/github-app-setup.md](./docs/github-app-setup.md))
-2. Configure your cluster access
+1. Create Personal Access Token (see [docs/pat-setup.md](./docs/pat-setup.md))
+2. Configure repository secrets: TOKEN, CONFIG_URL, KUBECONFIG
 3. Run the deployment workflow
 4. Test with a private repository
 
 ## Security Model
 
 - This public repository contains NO cluster secrets
-- Cluster access is configured via repository secrets
-- GitHub App credentials are stored securely
+- Cluster access is configured via repository secrets (KUBECONFIG, TOKEN, CONFIG_URL)
+- All sensitive data is base64-encoded and stored in GitHub Secrets
 
 ## Repository Structure
 
