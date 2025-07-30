@@ -116,6 +116,11 @@ jobs:
             --set-string githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
             --set maxRunners=${{ github.event.inputs.runner_replicas || 5 }} \
             --set minRunners=1 \
+            --set-string runnerGroup="default" \
+            --set runnerLabels[0]="self-hosted" \
+            --set runnerLabels[1]="linux" \
+            --set runnerLabels[2]="ARM64" \
+            --set runnerLabels[3]="arm64-runners" \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -128,11 +133,19 @@ jobs:
           echo "📊 Checking AutoscalingRunnerSet (ARC v0.12+ API)..."
           kubectl get autoscalingrunnerset -n actions-runner-system -o wide || echo "No AutoscalingRunnerSet found yet"
           
+          echo "🏷️ CRITICAL: Checking Runner Labels..."
+          kubectl get autoscalingrunnerset org-arm64-runners -n actions-runner-system -o jsonpath='{.spec.runnerLabels}' || echo "No runnerLabels found in spec"
+          echo ""
+          kubectl get autoscalingrunnerset org-arm64-runners -n actions-runner-system -o yaml | grep -A10 -B2 runnerLabels || echo "runnerLabels not found in YAML"
+          
           echo "🔍 Checking EphemeralRunnerSet..."
           kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found yet"
           
           echo "📋 Checking Helm release status..."
           helm status org-arm64-runners -n actions-runner-system
+          
+          echo "📋 Checking Helm values (including runnerLabels)..."
+          helm get values org-arm64-runners -n actions-runner-system
           
           echo "🔧 Checking all custom resources..."
           kubectl api-resources | grep actions || echo "ARC CRDs not found"

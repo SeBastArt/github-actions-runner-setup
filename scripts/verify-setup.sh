@@ -79,7 +79,7 @@ else
 fi
 
 # Check for runner scale sets with multiple possible resource names
-print_info "Checking Runner Scale Sets..."
+print_info "Checking Runner Scale Sets and Labels..."
 SCALE_SETS_FOUND=0
 
 # Try AutoscalingRunnerSet
@@ -88,6 +88,18 @@ if kubectl get autoscalingrunnerset -n actions-runner-system --no-headers > /dev
     if [ "$ARS_COUNT" -gt 0 ]; then
         print_success "AutoscalingRunnerSet found ($ARS_COUNT sets)"
         kubectl get autoscalingrunnerset -n actions-runner-system
+        
+        # Check runner labels specifically
+        print_info "Checking runner labels in AutoscalingRunnerSet..."
+        for ars in $(kubectl get autoscalingrunnerset -n actions-runner-system -o name); do
+            echo "Checking labels for $ars:"
+            kubectl get $ars -n actions-runner-system -o jsonpath='{.spec.runnerLabels}' && echo ""
+            if [ -z "$(kubectl get $ars -n actions-runner-system -o jsonpath='{.spec.runnerLabels}')" ]; then
+                print_warning "No runnerLabels found in $ars spec"
+            else
+                print_success "runnerLabels found in $ars"
+            fi
+        done
         SCALE_SETS_FOUND=1
     fi
 fi
