@@ -68,17 +68,18 @@ certutil -encode ~/.kube/config temp.b64 && type temp.b64 | findstr /v "CERTIFIC
 
 Du hast zwei Optionen für die `GITHUB_CONFIG_URL`:
 
-### Option A: User-weite Runner (Empfohlen)
+### Option A: Organization-weite Runner (Empfohlen)
 ```bash
-CONFIG_URL=https://github.com/dein-username
+CONFIG_URL=https://github.com/deine-organization
 ```
-- Runner sind für **alle** deine Repositories verfügbar
-- Einfacher zu verwalten
-- Ein Setup für alle privaten Repos
+- Runner sind für **alle** Repositories in der Organization verfügbar
+- Zentrale Verwaltung
+- Ein Setup für alle privaten und öffentlichen Repos
+- Bessere Skalierung und Resource-Sharing
 
 ### Option B: Repository-spezifische Runner
 ```bash  
-CONFIG_URL=https://github.com/dein-username/weatherstation
+CONFIG_URL=https://github.com/dein-username/repository-name
 ```
 - Runner nur für ein spezifisches Repository
 - Mehr Sicherheit, aber mehr Aufwand
