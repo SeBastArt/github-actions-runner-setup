@@ -26,7 +26,7 @@ on:
 
 env:
   HELM_VERSION: "3.13.0"
-  ARC_VERSION: "0.9.3"  # Aktualisiert für neuere Kubernetes Versionen
+  ARC_VERSION: "0.22.0"  # Stabile Version ohne cert-manager Zwang
 
 jobs:
   deploy-arc:
@@ -62,12 +62,12 @@ jobs:
           helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
           helm repo update
 
-      - name: Install/Upgrade ARC Controller (ohne cert-manager)
+      - name: Install/Upgrade ARC Controller (Version 0.22.0)
         run: |
           helm upgrade --install arc \
             --namespace actions-runner-system \
             --create-namespace \
-            --values ./helm/values/arc-controller.yaml \
+            --version ${{ env.ARC_VERSION }} \
             --wait \
             actions-runner-controller/actions-runner-controller
 
@@ -78,17 +78,37 @@ jobs:
             --selector=app.kubernetes.io/name=actions-runner-controller \
             --timeout=300s
 
-      - name: Deploy Runner Scale Set
+      - name: Create RunnerDeployment (Version 0.22.0)
         run: |
-          helm upgrade --install github-runners \
-            --namespace actions-runner-system \
-            --wait \
-            actions-runner-controller/gha-runner-scale-set \
-            --values ./helm/values/base-values.yaml \
-            --values ./helm/values/${{ github.event.inputs.environment || 'production' }}.yaml \
-            --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
-            --set-string githubConfigUrl="${{ secrets.CONFIG_URL }}" \
-            --set maxRunners="${{ github.event.inputs.runner_replicas || '2' }}"
+          cat <<EOF | kubectl apply -f -
+          apiVersion: actions.summerwind.dev/v1alpha1
+          kind: RunnerDeployment
+          metadata:
+            name: arm64-runners
+            namespace: actions-runner-system
+          spec:
+            replicas: ${{ github.event.inputs.runner_replicas || '2' }}
+            template:
+              spec:
+                repository: ${{ secrets.CONFIG_URL }}
+                env:
+                - name: GITHUB_TOKEN
+                  value: "${{ secrets.TOKEN }}"
+                nodeSelector:
+                  kubernetes.io/arch: arm64
+                resources:
+                  requests:
+                    cpu: "100m"
+                    memory: "256Mi"
+                  limits:
+                    cpu: "2000m"
+                    memory: "4Gi"
+                labels:
+                - "self-hosted"
+                - "linux"
+                - "ARM64"
+                - "arm64-runners"
+          EOF
 
       - name: Verify deployment
         run: |
