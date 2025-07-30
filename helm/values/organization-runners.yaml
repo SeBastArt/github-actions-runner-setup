@@ -5,10 +5,10 @@ githubConfigUrl: https://github.com/wondering-developer
 githubConfigSecret:
   github_token: ""  # Will be set via --set
 
-# Runner configuration
+# Runner configuration - Keep runners ready for fast builds
 runnerGroup: "default"
-maxRunners: 5
-minRunners: 1
+maxRunners: 8
+minRunners: 3  # Always keep 3 runners ready
 
 # CRITICAL: This is how runners are targeted now (by installation name)
 runnerScaleSetName: "arm64-runners"
@@ -145,9 +145,15 @@ template:
       runAsGroup: 121
       fsGroup: 121
 
-# Autoscaling configuration
-scaleDownDelaySecondsAfterScaleOut: 300
-scaleDownFactor: 0.5
+# Autoscaling configuration - Faster scaling, keep runners longer
+scaleDownDelaySecondsAfterScaleOut: 600  # Keep extra runners for 10 minutes
+scaleDownFactor: 0.3  # Scale down more gradually
+scaleUpTrigger:
+  githubEvent:
+    - check_run
+    - pull_request
+    - push
+  duration: "30s"  # React faster to new jobs
 
 # Cleanup
 podCleanupTimeout: 600
