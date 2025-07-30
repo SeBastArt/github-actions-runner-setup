@@ -1,5 +1,5 @@
 # GitHub Actions Runner Scale Set Values
-# ARC v0.12+ Compatible - NO Docker (back to containerd)
+# ARC v0.12+ Compatible - Working Docker-in-Docker
 
 githubConfigUrl: https://github.com/wondering-developer
 githubConfigSecret:
@@ -16,12 +16,18 @@ runnerScaleSetName: "arm64-runners"
 # NOTE: runnerLabels are NOT supported in ARC v0.12+
 # Runners automatically get: self-hosted, linux, ARM64 based on runtime detection
 
-# Template for ARM64 runners (back to basic containerd setup)
+# Template for ARM64 runners with working Docker-in-Docker
 template:
   spec:
     # CRITICAL: This nodeSelector ensures ARM64 placement and triggers ARM64 label
     nodeSelector:
       kubernetes.io/arch: arm64
+    
+    # Security context for the entire pod
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 121
+      fsGroup: 121
     
     containers:
     - name: runner
@@ -37,15 +43,45 @@ template:
           cpu: "2000m"
           memory: "4Gi"
       
-      # Environment variables (NO Docker)
+      # Environment variables for Docker-in-Docker
       env:
       - name: RUNNER_TOOL_CACHE
         value: "/opt/hostedtoolcache"
+      - name: DOCKER_HOST
+        value: "tcp://localhost:2376"
+      - name: DOCKER_TLS_CERTDIR
+        value: ""
       
       # Volume mounts
       volumeMounts:
       - name: tool-cache
         mountPath: /opt/hostedtoolcache
+    
+    # Docker-in-Docker sidecar container with proper permissions
+    - name: docker-dind
+      image: docker:24-dind
+      
+      # Environment variables for DinD
+      env:
+      - name: DOCKER_TLS_CERTDIR
+        value: ""
+      - name: DOCKER_DRIVER
+        value: overlay2
+      
+      # CRITICAL: Must run as root with privileged access
+      securityContext:
+        privileged: true
+        runAsUser: 0
+        runAsGroup: 0
+      
+      # Resource limits for DinD
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "1000m"
+          memory: "2Gi"
     
     # Volumes
     volumes:
@@ -53,12 +89,6 @@ template:
       emptyDir: {}
       
     restartPolicy: Never
-    
-    # Security context
-    securityContext:
-      runAsUser: 1001
-      runAsGroup: 121
-      fsGroup: 121
 
 # Autoscaling configuration
 scaleDownDelaySecondsAfterScaleOut: 300
