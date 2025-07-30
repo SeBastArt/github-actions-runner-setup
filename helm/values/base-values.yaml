@@ -13,13 +13,6 @@ githubConfigSecret:
 # Runner configuration
 runnerScaleSetName: "arm64-runners"
 
-# Labels for runner identification
-runnerLabels:
-  - "self-hosted"
-  - "linux" 
-  - "ARM64"
-  - "arm64-runners"
-
 # Template for the runner pods
 template:
   spec:

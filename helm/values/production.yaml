@@ -39,13 +39,3 @@ template:
         value: "1"
       - name: BUILDX_EXPERIMENTAL
         value: "1"
-
-# Resource quotas (optional)
-# Uncomment if you want to limit total resource usage
-# resourceQuota:
-#   enabled: true
-#   hard:
-#     requests.cpu: "20"
-#     requests.memory: "40Gi"
-#     limits.cpu: "40" 
-#     limits.memory: "80Gi"

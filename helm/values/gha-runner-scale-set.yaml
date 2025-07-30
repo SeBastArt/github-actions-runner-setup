@@ -69,14 +69,7 @@ template:
 
 # Scaling Konfiguration
 minRunners: 0
-maxRunners: 5
-
-# Runner Labels
-runnerLabels:
-- "self-hosted"
-- "linux"
-- "ARM64"
-- "arm64-runners"
+maxRunners: 8
 
 # Listener Template (neue API)
 listenerTemplate:

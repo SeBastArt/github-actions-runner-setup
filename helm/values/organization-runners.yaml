@@ -8,7 +8,7 @@ githubConfigSecret:
 # Runner configuration - Keep runners ready for fast builds
 runnerGroup: "default"
 maxRunners: 8
-minRunners: 3  # Always keep 3 runners ready
+minRunners: 4
 
 # CRITICAL: This is how runners are targeted now (by installation name)
 runnerScaleSetName: "arm64-runners"
