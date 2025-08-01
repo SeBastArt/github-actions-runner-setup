@@ -4,6 +4,10 @@
 # Production runner scale set name
 runnerScaleSetName: "production-arm64"
 
+labels:
+  - self-hosted
+  - production-arm64
+
 # Production template overrides
 template:
   spec:
