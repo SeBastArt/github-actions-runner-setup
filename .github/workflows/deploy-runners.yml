@@ -3,14 +3,6 @@ name: Deploy GitHub Actions Runners
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
       runner_replicas:
         description: 'Number of runner replicas'
         required: true
@@ -20,6 +12,7 @@ on:
   push:
     branches:
       - main
+      - master  # Added master branch protection
     paths:
       - 'helm/**'
       - '.github/workflows/deploy-runners.yml'
@@ -29,10 +22,19 @@ env:
   # Using latest ARC version for best compatibility and features
   ARC_VERSION: "0.12.1"
 
+# SECURITY: Restricted permissions
+permissions:
+  contents: read
+
 jobs:
   deploy-arc:
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest  # SECURITY: Use GitHub-hosted runners for infrastructure deployment
+    environment: production
+    
+    # SECURITY: Additional environment protection
+    concurrency:
+      group: deploy-arc-production
+      cancel-in-progress: false
     
     steps:
       - name: Checkout repository
@@ -109,19 +111,18 @@ jobs:
             --wait \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 
-      - name: Deploy Runner Scale Set (Organization-Level)
+      - name: Deploy Runner Scale Set (Production)
         run: |
-          # Organization-level runners for all repositories
+          # Deploy production runners with configurable count using values files
           # WITH Docker-in-Docker for container builds
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --create-namespace \
-            --values ./helm/values/organization-runners.yaml \
+            --values ./values/base.yaml \
+            --values ./values/production.yaml \
             --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set-string githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set maxRunners=${{ github.event.inputs.runner_replicas || 5 }} \
-            --set minRunners=1 \
-            --set-string runnerGroup="default" \
+            --set maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set

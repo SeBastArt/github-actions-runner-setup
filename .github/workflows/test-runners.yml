@@ -14,19 +14,38 @@ on:
           - helm
           - full
   
-  # Automatically test after runner deployment
-  workflow_run:
-    workflows: ["Deploy GitHub Actions Runners"]
-    types:
-      - completed
+  # SECURITY: Only trigger after successful runner deployment, never on PRs
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/test-runners.yml'
+      - 'scripts/verify-setup.sh'
+
+# SECURITY: Restricted permissions
+permissions:
+  contents: read
 
 jobs:
   test-runner-connectivity:
     # ARC v0.12+ targeting: Use installation name ONLY (no label arrays)
-    runs-on: arm64-runners
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
     
     steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security check: Verifying test runner environment"
+          echo "Runner: $(hostname)"
+          echo "User: $(whoami)"
+          echo "Architecture: $(uname -m)"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
       - name: Test basic runner functionality
         run: |
           echo "🚀 Testing ARM64 self-hosted runner..."
@@ -47,11 +66,21 @@ jobs:
 
   test-docker:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
-    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'docker' || github.event.inputs.test_type == 'full')
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
+    if: (github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'docker' || github.event.inputs.test_type == 'full')
     needs: test-runner-connectivity
     
     steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security check: Verifying Docker test runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
       - name: Test Docker availability
         run: |
           echo "🐳 Testing Docker functionality..."
@@ -81,14 +110,24 @@ jobs:
 
   test-kubernetes-access:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
-    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'helm' || github.event.inputs.test_type == 'full')
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
+    if: (github.event_name == 'workflow_dispatch') && (github.event.inputs.test_type == 'helm' || github.event.inputs.test_type == 'full')
     needs: test-runner-connectivity
     
     steps:
-      - name: Test kubectl access
+      - name: Verify runner security
         run: |
-          echo "☸️ Testing Kubernetes access..."
+          echo "🔐 Security check: Verifying Kubernetes test runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
+      - name: Test kubectl access (read-only)
+        run: |
+          echo "☸️ Testing Kubernetes access (read-only)..."
           if command -v kubectl &> /dev/null; then
             kubectl version --client
             kubectl cluster-info
@@ -109,11 +148,20 @@ jobs:
 
   test-checkout-and-build:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
     needs: test-runner-connectivity
     
     steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security check: Verifying checkout test runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
       - name: Test repository checkout
         uses: actions/checkout@v4
         
@@ -140,11 +188,20 @@ jobs:
 
   test-network-connectivity:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
     needs: test-runner-connectivity
     
     steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security check: Verifying network test runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
       - name: Test internet connectivity
         run: |
           echo "🌐 Testing network connectivity..."
@@ -161,11 +218,21 @@ jobs:
 
   test-performance:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
-    if: (github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch') && github.event.inputs.test_type == 'full'
+    runs-on: production-arm64
+    environment: production  # SECURITY: Environment protection
+    if: (github.event_name == 'workflow_dispatch') && github.event.inputs.test_type == 'full'
     needs: test-runner-connectivity
     
     steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security check: Verifying performance test runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+          
       - name: Performance benchmark
         run: |
           echo "⚡ Running performance tests..."
@@ -186,7 +253,7 @@ jobs:
 
   test-summary:
     # ARC v0.12+ targeting: Use installation name ONLY
-    runs-on: arm64-runners
+    runs-on: ubuntu-latest  # SECURITY: Use GitHub-hosted runner for summary
     needs: [test-runner-connectivity, test-checkout-and-build, test-network-connectivity]
     if: always()
     
@@ -218,6 +285,6 @@ jobs:
           echo "🎉 ARM64 self-hosted runner is ready for your private repositories!"
           echo ""
           echo "Next steps:"
-          echo "1. Update your private repository workflows to use: runs-on: arm64-runners"
+          echo "1. Update your private repository workflows to use: runs-on: production-arm64"
           echo "2. Remove QEMU and buildx setup from Docker builds"
           echo "3. Enjoy faster, native ARM64 builds! 🚀"

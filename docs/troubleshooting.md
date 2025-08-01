@@ -1,216 +1,282 @@
-# Troubleshooting Guide
+# Troubleshooting Guide for GitHub Actions Runner Controller (ARC)
+# =================================================================
 
-## Häufige Probleme und Lösungen
+This guide helps you diagnose and fix common issues when deploying GitHub's official Actions Runner Controller with OCI charts on ARM64 Kubernetes clusters.
 
-### 1. Runner erscheinen nicht in GitHub
+## Quick Diagnosis Commands
 
-**Symptome:**
-- Deployment erfolgreich, aber keine Runner in GitHub Settings sichtbar
-- Jobs bleiben in der Queue hängen
-
-**Mögliche Ursachen & Lösungen:**
+Before diving into specific issues, run these commands to get an overview:
 
 ```bash
-# 1. Prüfe Controller Status
-kubectl get pods -n actions-runner-system
-kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller
+# Check overall cluster and ARC status
+kubectl cluster-info
+kubectl get all -n actions-runner-system
 
-# 2. Prüfe GitHub Token (ersetze mit deinem echten Token)
-curl -H "Authorization: token ghp_..." https://api.github.com/user
+# Check your ARM64 nodes
+kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
 
-# 3. Prüfe Runner Scale Set
-kubectl get runnerscalesets -n actions-runner-system
-kubectl describe runnerscalesets -n actions-runner-system
-```
-
-**Häufige Fixes:**
-- Token abgelaufen → Neuen PAT erstellen
-- Falsche CONFIG_URL → Prüfe URL Format
-- Fehlende Permissions → Prüfe Token Scopes
-
-### 2. Authentication Fehler
-
-**Fehler:**
-```
-Error: Bad credentials
-```
-
-**Lösung:**
-```bash
-# 1. Token testen (ersetze mit deinem echten Token)
-curl -H "Authorization: token ghp_..." https://api.github.com/user
-
-# 2. Token Scopes prüfen
-curl -H "Authorization: token ghp_..." https://api.github.com/user/repos
-
-# 3. Secret prüfen (im GitHub Repo)
-# Settings → Secrets → TOKEN sollte korrekt sein
-```
-
-### 3. Pods starten nicht
-
-**Symptome:**
-- Runner Pods bleiben in "Pending" oder "ImagePullBackOff"
-
-**Debug Commands:**
-```bash
-# Pod Status prüfen
-kubectl get pods -n actions-runner-system
-kubectl describe pod <pod-name> -n actions-runner-system
-
-# Events prüfen
+# View recent events (most helpful for quick diagnosis)
 kubectl get events -n actions-runner-system --sort-by='.lastTimestamp'
 ```
 
-**Häufige Ursachen:**
-- **ARM64 Image nicht verfügbar:** Prüfe ob Runner Image ARM64 unterstützt
-- **Resource Limits:** Node hat nicht genug CPU/Memory
-- **Node Selector:** Kein ARM64 Node verfügbar
+## Common Issues and Solutions
 
-**Lösungen:**
+### 1. Runners Not Appearing in GitHub
+
+**Symptoms:**
+- Deployment succeeds but no runners visible in GitHub Settings
+- Jobs stuck in queue with "Waiting for a runner to pick up this job"
+
+**Quick Diagnosis:**
 ```bash
-# 1. Node Architecture prüfen
-kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+# Check controller status
+kubectl get pods -n actions-runner-system
+kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller
 
-# 2. Node Resources prüfen  
+# Check AutoscalingRunnerSet (ARC v0.12+)
+kubectl get autoscalingrunnerset -n actions-runner-system
+kubectl describe autoscalingrunnerset -n actions-runner-system
+```
+
+**Common Causes & Fixes:**
+- **Token expired** → Create new Organization Token with admin:org + repo permissions
+- **Wrong CONFIG_URL** → Must be Organization URL: `https://github.com/YOUR_ORG`
+- **Missing permissions** → Token needs admin:org and repo scopes
+- **Wrong API endpoint** → Verify token with: `curl -H "Authorization: token ghp_..." https://api.github.com/orgs/YOUR_ORG`
+
+### 2. Authentication Errors
+
+**Error Messages:**
+```
+Error: Bad credentials
+Error: Not Found
+Error: API rate limit exceeded
+```
+
+**Solutions:**
+```bash
+# Test your Organization Token
+curl -H "Authorization: token ghp_..." https://api.github.com/orgs/YOUR_ORG
+
+# Check token permissions (should list runners)
+curl -H "Authorization: token ghp_..." https://api.github.com/orgs/YOUR_ORG/actions/runners
+
+# Verify CONFIG_URL format
+echo $CONFIG_URL  # Should be https://github.com/YOUR_ORG
+```
+
+**Fix Steps:**
+1. Generate new Organization Token in GitHub Organization Settings
+2. Ensure admin:org and repo permissions are granted
+3. Update TOKEN secret in your GitHub repository
+4. Redeploy using the workflow
+
+### 3. Pods Won't Start (Pending/ImagePullBackOff)
+
+**Symptoms:**
+- Runner pods stuck in "Pending" or "ImagePullBackOff"
+- No runners scaling up despite jobs in queue
+
+**Diagnosis:**
+```bash
+# Check pod status and events
+kubectl get pods -n actions-runner-system
+kubectl describe pod <pod-name> -n actions-runner-system
+
+# Check node resources and architecture
+kubectl get nodes -o wide
 kubectl describe nodes
 kubectl top nodes
-
-# 3. Runner Image prüfen
-docker manifest inspect ghcr.io/actions/actions-runner:latest
 ```
 
-### 4. Docker-in-Docker Probleme
+**Common Causes:**
+- **No ARM64 nodes available** → Verify: `kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`
+- **Resource constraints** → Check node CPU/memory availability
+- **Image pull issues** → Verify network connectivity to GitHub Container Registry
 
-**Fehler:**
+**Solutions:**
+```bash
+# Verify ARM64 node selector is working
+kubectl get autoscalingrunnerset -n actions-runner-system -o yaml | grep -A5 nodeSelector
+
+# Check if nodes meet resource requirements
+kubectl describe autoscalingrunnerset -n actions-runner-system | grep -A10 "Resources"
+
+# Test image pull manually
+docker pull ghcr.io/actions/actions-runner:latest
+```
+
+### 4. Docker-in-Docker Not Working
+
+**Error Messages:**
 ```
 Cannot connect to the Docker daemon at unix:///var/run/docker.sock
+docker: command not found
 ```
 
-**Lösung:**
+**Root Cause:**
+This setup uses `containerMode.type: "dind"` which automatically provisions Docker-in-Docker sidecars.
+
+**Verification:**
 ```bash
-# 1. Docker Socket verfügbar?
-kubectl exec -it <runner-pod> -n actions-runner-system -- ls -la /var/run/docker.sock
+# Check if containerMode is properly configured
+kubectl get autoscalingrunnerset <name> -o yaml | grep -A5 -B5 dind
 
-# 2. Permissions prüfen
-kubectl exec -it <runner-pod> -n actions-runner-system -- docker ps
-
-# 3. Alternative: Docker-in-Docker Container
-# Siehe base-values.yaml für DinD Setup
+# Verify docker:dind sidecar is running
+kubectl describe autoscalingrunnerset <name> | grep -A10 "Init Containers"
+kubectl describe pod <runner-pod> | grep -A10 docker
 ```
 
-### 5. Network Connectivity Issues
-
-**Symptome:**
-- Workflows können nicht auf Internet zugreifen
-- Docker pulls schlagen fehl
-
-**Debug:**
+**Fix:**
 ```bash
-# 1. Connectivity von Pod testen
-kubectl run debug-pod --image=alpine -it --rm -- /bin/sh
-# Im Pod: ping 8.8.8.8, nslookup github.com
+# Ensure values/base.yaml contains:
+# containerMode:
+#   type: "dind"
 
-# 2. DNS prüfen
+# Redeploy if missing
+helm upgrade --install production-runners \
+  --namespace actions-runner-system \
+  --values ./values/base.yaml \
+  --values ./values/production.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+```
+
+### 5. Jobs Stuck in Queue
+
+**Most Common Cause: Wrong Runner Targeting**
+
+In ARC v0.12+, you MUST use the runnerScaleSetName, not label arrays:
+
+```yaml
+# ❌ WRONG (deprecated in ARC v0.12+)
+runs-on: [self-hosted, linux, ARM64, arm64-runners]
+
+# ✅ CORRECT  
+runs-on: production-arm64  # Must match runnerScaleSetName in values/production.yaml
+```
+
+**Other Causes:**
+```bash
+# Check if runners are actually online
+kubectl get autoscalingrunnerset -n actions-runner-system
+kubectl get pods -n actions-runner-system
+
+# Verify scaling limits
+kubectl describe autoscalingrunnerset | grep -A5 "Min\|Max"
+```
+
+**Runner Visibility Settings (GitHub Organization):**
+1. Go to **GitHub Organization** → **Settings** → **Actions** → **Runners**
+2. Click on your runner (e.g., `production-arm64`)
+3. Set **Repository access** → **Selected repositories** or **All repositories**
+4. Enable **Runner visibility** → ✅ **Public repositories** + ✅ **Private repositories**
+
+### 6. OCI Chart Specific Issues (ARC v0.12+)
+
+**Error: "More than one gha-rs-controller deployment found"**
+```bash
+# Solution: Explicit controller service account reference
+helm upgrade --install production-runners \
+  --set controllerServiceAccount.name="arc-controller-gha-rs-controller" \
+  --set controllerServiceAccount.namespace="actions-runner-system" \
+  --namespace actions-runner-system \
+  --values ./values/base.yaml \
+  --values ./values/production.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+```
+
+**Values Files Not Applied:**
+```bash
+# Debug: Check what values are actually applied
+helm get values production-runners -n actions-runner-system
+
+# Test without installation
+helm template test-release \
+  --values ./values/base.yaml \
+  --values ./values/production.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+```
+
+### 7. Network Connectivity Issues
+
+**Symptoms:**
+- Workflows can't reach internet
+- Docker pulls fail
+- Git operations timeout
+
+**Diagnosis:**
+```bash
+# Test connectivity from a runner pod
 kubectl exec -it <runner-pod> -n actions-runner-system -- nslookup github.com
+kubectl exec -it <runner-pod> -n actions-runner-system -- curl -I https://github.com
 
-# 3. Network Policies prüfen
-kubectl get networkpolicies -n actions-runner-system
+# Test from cluster (create debug pod)
+kubectl run debug-pod --image=alpine -it --rm -- /bin/sh
+# Inside pod: ping 8.8.8.8, nslookup github.com, wget https://github.com
 ```
 
-### 6. Resource Quotas/Limits
+**Required Outbound Access:**
+- `api.github.com:443` (GitHub API)
+- `github.com:443` (GitHub assets)
+- `ghcr.io:443` (GitHub Container Registry)
+- `registry-1.docker.io:443` (Docker Hub)
 
-**Fehler:**
+### 8. Resource Quotas and Limits
+
+**Error Messages:**
 ```
 pods "runner-xyz" is forbidden: exceeded quota
+Insufficient memory
+Insufficient cpu
 ```
 
-**Lösung:**
+**Solutions:**
 ```bash
-# 1. Quota prüfen
-kubectl describe quota -n actions-runner-system
-
-# 2. Resource Usage prüfen
+# Check current resource usage
+kubectl top nodes
 kubectl top pods -n actions-runner-system
 
-# 3. Limits in values.yaml anpassen
-# Reduziere resources.requests/limits
+# Check quotas
+kubectl describe quota -n actions-runner-system
+
+# Adjust limits in values/production.yaml
+template:
+  spec:
+    containers:
+    - name: runner
+      resources:
+        requests:
+          cpu: "100m"      # Reduce if needed
+          memory: "256Mi"  # Reduce if needed
+        limits:
+          cpu: "2000m"     # Adjust based on available resources
+          memory: "4Gi"    # Adjust based on available resources
 ```
 
-### 7. Helm Deployment Fehler
+## Complete Cleanup and Fresh Start
 
-**Fehler:**
-```
-Error: failed to create resource: the server could not find the requested resource
-```
+If you're experiencing persistent issues:
 
-**Lösung:**
 ```bash
-# 1. CRDs installiert?
-kubectl get crd | grep actions
-
-# 2. ARC Controller erst installieren
-helm upgrade --install arc actions-runner-controller/actions-runner-controller
-
-# 3. Dann Runner Scale Set
-helm upgrade --install github-runners actions-runner-controller/gha-runner-scale-set
-```
-
-### 8. Jobs bleiben in Queue
-
-**Symptome:**
-- Workflow startet nicht
-- "Waiting for a runner to pick up this job"
-
-**🚨 HÄUFIGSTE URSACHE: Runner Visibility Settings**
-
-**Problem**: Runner ist online, aber für Public/Private Repos nicht freigegeben.
-
-**✅ LÖSUNG**:
-1. **GitHub Organization** → **Settings** → **Actions** → **Runners**
-2. **Klicke auf deinen Runner** (z.B. `arm64-runners`)
-3. **Repository access** → **Selected repositories** oder **All repositories**
-4. **Oder**: **Runner visibility** → ✅ **Public repositories** + ✅ **Private repositories**
-
-**Andere mögliche Ursachen:**
-```bash
-# 1. Runner Labels stimmen nicht überein (ARC v0.12+ uses installation names)
-# FALSCH: runs-on: [self-hosted, linux, ARM64, arm64-runners] 
-# RICHTIG: runs-on: arm64-runners
-
-# 2. Keine verfügbaren Runner
-kubectl get runnerscalesets -n actions-runner-system
-kubectl get runners -n actions-runner-system
-
-# 3. Runner Scale Set Limits
-# Prüfe maxRunners in values.yaml
-```
-
-### 9. Cleanup nach Fehlern
-
-**Kompletter Neustart:**
-```bash
-# 1. Cleanup Script ausführen
+# 1. Run cleanup script
 ./scripts/cleanup.sh
 
-# 2. Namespace manuell löschen (falls hängen bleibt)
+# 2. Manual namespace cleanup if needed
 kubectl delete namespace actions-runner-system --force --grace-period=0
 
-# 3. CRDs löschen (vorsichtig!)
+# 3. Clean up CRDs (careful!)
 kubectl get crd | grep actions | awk '{print $1}' | xargs kubectl delete crd
 
-# 4. Neu deployen
-# Führe deploy-runners.yml Workflow aus
+# 4. Fresh deployment
+# Use deploy-runners.yml workflow with clean environment
 ```
 
-## Debug Commands Cheat Sheet
+## Debug Commands Reference
 
 ```bash
-# Cluster Status
+# Cluster Overview
 kubectl cluster-info
 kubectl get nodes -o wide
-
-# Namespace Status
 kubectl get all -n actions-runner-system
 
 # Controller Logs
@@ -219,55 +285,50 @@ kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-c
 # Runner Logs
 kubectl logs -n actions-runner-system -l app=github-runner -f
 
-# Events
+# Events (most useful for troubleshooting)
 kubectl get events -n actions-runner-system --sort-by='.lastTimestamp'
+
+# Custom Resources (ARC v0.12+)
+kubectl get autoscalingrunnerset -n actions-runner-system -o yaml
+kubectl describe autoscalingrunnerset -n actions-runner-system
 
 # Resource Usage
 kubectl top nodes
 kubectl top pods -n actions-runner-system
 
-# Custom Resources
-kubectl get runnerscalesets -n actions-runner-system -o yaml
-kubectl describe runnerscalesets -n actions-runner-system
-kubectl get runners -n actions-runner-system -o yaml
-kubectl describe runners -n actions-runner-system
-
 # Helm Status
 helm list -n actions-runner-system
-helm status arc -n actions-runner-system
-helm status github-runners -n actions-runner-system
+helm status production-runners -n actions-runner-system
 ```
 
-## Performance Tuning
+## Performance Optimization
 
-### Für bessere Performance:
-
+### For Better Performance:
 ```yaml
-# In production.yaml
+# In values/production.yaml
 template:
   spec:
     containers:
     - name: runner
       resources:
         requests:
-          cpu: "1000m"      # Mehr CPU
-          memory: "2Gi"     # Mehr Memory
+          cpu: "1000m"      # More CPU
+          memory: "2Gi"     # More memory
         limits:
           cpu: "4000m"
           memory: "8Gi"
 
-# Mehr parallele Runner
+# More parallel runners
 maxRunners: 10
 minRunners: 2
 
-# Schnelleres Scaling
+# Faster scaling
 scaleDownDelaySecondsAfterScaleOut: 120
 ```
 
-### Für ARM64 spezifische Optimierungen:
-
+### ARM64 Specific Optimizations:
 ```yaml
-# Native ARM64 builds nutzen
+# Use native ARM64 builds
 template:
   spec:
     containers:
@@ -279,27 +340,29 @@ template:
         value: "1"
 ```
 
-## Support
+## Getting Help
 
-Wenn alle Troubleshooting-Schritte fehlschlagen:
+When all troubleshooting steps fail:
 
-1. **GitHub Issues:** https://github.com/actions/actions-runner-controller/issues
-2. **Kubernetes Events:** `kubectl get events --all-namespaces`
-3. **System Logs:** Prüfe Node-Logs auf dem ARM64 Cluster
-4. **GitHub Status:** https://www.githubstatus.com/
+1. **GitHub Issues**: https://github.com/actions/actions-runner-controller/issues
+2. **Check GitHub Status**: https://www.githubstatus.com/
+3. **Enable Debug Logging**:
+   ```yaml
+   # In values/base.yaml
+   log:
+     level: debug  # instead of info
+     format: json  # for structured logs
+   ```
+   Then check logs: `kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller -f`
 
-## Logging Level erhöhen
+4. **System Events**: `kubectl get events --all-namespaces`
 
-Für detaillierteres Debugging:
+## Remember
 
-```yaml
-# In base-values.yaml
-log:
-  level: debug  # statt info
-  format: json  # für strukturierte Logs
-```
+- **Always use Environment Protection** for production deployments
+- **Monitor resource usage** regularly
+- **Rotate tokens** periodically
+- **Keep runners updated** by redeploying regularly
+- **Test in staging** before production changes
 
-Dann neu deployen und Logs prüfen:
-```bash
-kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller -f
-```
+This troubleshooting guide should help you resolve most common issues. For complex problems, gather logs and system information before seeking help.

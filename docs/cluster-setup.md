@@ -1,61 +1,101 @@
 # Kubernetes Cluster Setup for GitHub Actions Runners
+# ===================================================
 
-## Prerequisites
+This guide helps you prepare your ARM64 Kubernetes cluster for deploying GitHub's official Actions Runner Controller (ARC) with OCI charts.
 
-Before deploying the GitHub Actions Runner Controller, ensure your ARM64 Kubernetes cluster meets these requirements.
+## Prerequisites Overview
+
+Before deploying ARC, ensure your ARM64 Kubernetes cluster meets these requirements and has proper security configurations in place.
 
 ## Cluster Requirements
 
-### Minimum Resources
-- **Nodes**: At least 1 ARM64 node
-- **CPU**: 2+ cores per node recommended  
-- **Memory**: 4GB+ RAM per node recommended
-- **Storage**: 20GB+ available storage
+### Minimum System Requirements
+- **Kubernetes Version**: 1.24+ (recommended: 1.28+)
+- **Nodes**: At least 1 ARM64 node with sufficient resources
+- **CPU**: 2+ cores per node (4+ cores recommended for production)
+- **Memory**: 4GB+ RAM per node (8GB+ recommended for production)
+- **Storage**: 20GB+ available storage per node
+- **Container Runtime**: Docker or containerd
 
-### Kubernetes Version
-- **Supported**: Kubernetes 1.24+
-- **Recommended**: Kubernetes 1.28+
-
-## Pre-Installation Checklist
-
-### 1. Verify Cluster Access
+### Architecture Verification
+Your cluster must have ARM64 nodes available:
 
 ```bash
-# Test cluster connectivity
-kubectl cluster-info
+# Verify all nodes are ARM64
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.architecture}{"\n"}{end}'
 
-# Verify ARM64 nodes
-kubectl get nodes -o wide
-kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+# Should show "arm64" for all nodes
+# Expected output:
+# node-1  arm64
+# node-2  arm64
 ```
 
-### 2. Check Container Runtime
+## Pre-Installation Validation
 
+### 1. Cluster Access and Health
 ```bash
-# Verify container runtime (Docker or containerd)
+# Test basic cluster connectivity
+kubectl cluster-info
+
+# Verify nodes are ready
+kubectl get nodes -o wide
+
+# Check system pods are running
+kubectl get pods -n kube-system
+```
+
+### 2. Container Runtime Verification
+```bash
+# Check container runtime version
 kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.containerRuntimeVersion}'
 
-# For Docker socket access (if needed)
+# For Docker-in-Docker support, verify Docker socket availability
 kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.operatingSystem}'
 ```
 
-### 3. Verify Network Connectivity
+### 3. Network Connectivity Test
+Your cluster needs outbound internet access:
 
 ```bash
-# Test internet access from cluster
-kubectl run test-pod --image=alpine:latest --rm -i --tty -- /bin/sh
-# Inside pod: ping 8.8.8.8, nslookup github.com, exit
+# Test network connectivity from cluster
+kubectl run network-test --image=alpine:latest --rm -i --tty -- /bin/sh
+
+# Inside the test pod, run:
+ping -c 3 8.8.8.8
+nslookup github.com
+wget -q --spider https://api.github.com && echo "GitHub API reachable"
+wget -q --spider https://ghcr.io && echo "GitHub Container Registry reachable"
+exit
 ```
 
-## Required Cluster Permissions
+## Required Network Access
 
-Your kubeconfig user needs these permissions:
+Your cluster must have outbound access to these endpoints:
+
+### Essential Endpoints
+- **GitHub API**: `api.github.com:443`
+- **GitHub Assets**: `github.com:443` 
+- **GitHub Container Registry**: `ghcr.io:443` (for OCI charts and runner images)
+- **Docker Hub**: `registry-1.docker.io:443` (for pulling images)
+
+### DNS Resolution
+Ensure your cluster can resolve these domains:
+```bash
+# Test DNS resolution
+kubectl run dns-test --image=alpine:latest --rm -i --restart=Never -- nslookup api.github.com
+kubectl run dns-test --image=alpine:latest --rm -i --restart=Never -- nslookup ghcr.io
+```
+
+## Kubernetes Permissions Setup
+
+### Required Cluster Permissions
+Your kubeconfig user needs these permissions to deploy ARC:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: github-actions-runner-admin
+  name: arc-deployment-admin
 rules:
 # Namespace management
 - apiGroups: [""]
@@ -64,87 +104,42 @@ rules:
 
 # Pod and deployment management  
 - apiGroups: [""]
-  resources: ["pods", "pods/log", "pods/exec"]
+  resources: ["pods", "pods/log", "pods/exec", "services", "serviceaccounts", "secrets", "configmaps"]
   verbs: ["get", "list", "create", "update", "patch", "delete", "watch"]
 
 - apiGroups: ["apps"]
   resources: ["deployments", "replicasets"]
   verbs: ["get", "list", "create", "update", "patch", "delete"]
 
-# Service accounts and RBAC
-- apiGroups: [""]
-  resources: ["serviceaccounts", "secrets", "configmaps"]
-  verbs: ["get", "list", "create", "update", "patch", "delete"]
-
+# RBAC management
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
   verbs: ["get", "list", "create", "update", "patch", "delete"]
 
-# Custom resources (for ARC)
-- apiGroups: ["actions.summerwind.dev", "actions.github.com"]
+# ARC Custom Resources (v0.12+)
+- apiGroups: ["actions.github.com"]
   resources: ["*"]
   verbs: ["*"]
 
-# Admission controllers
+# Webhook configurations
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
   verbs: ["get", "list", "create", "update", "patch", "delete"]
 ```
 
-## Network Requirements
-
-### Outbound Connectivity
-
-Your cluster needs outbound access to:
-
-- **GitHub API**: `api.github.com:443`
-- **GitHub Assets**: `github.com:443`
-- **Docker Hub**: `registry-1.docker.io:443` (for pulling runner images)
-- **Helm Charts**: `actions-runner-controller.github.io:443`
-
-### Internal Connectivity
-
-- Pods need to communicate within the cluster
-- If using Docker-in-Docker, ensure proper networking setup
-
-## Storage Requirements
-
-### Persistent Volumes (Optional)
-
-If you want persistent tool caches:
-
-```yaml
-apiVersion: v1
-kind: StorageClass
-metadata:
-  name: runner-storage
-provisioner: kubernetes.io/no-provisioner
-volumeBindingMode: WaitForFirstConsumer
-reclaimPolicy: Delete
-```
-
-### Temporary Storage
-
-Ensure nodes have sufficient ephemeral storage for:
-- Container images
-- Build artifacts  
-- Tool caches
-
-## Security Considerations
-
-### 1. Node Security
-
+### Permission Verification
 ```bash
-# Ensure nodes are properly secured
-kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
-
-# Check for security updates
-kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kernelVersion}'
+# Test if you have required permissions
+kubectl auth can-i create namespaces
+kubectl auth can-i create pods --namespace=actions-runner-system
+kubectl auth can-i create secrets --namespace=actions-runner-system
+kubectl auth can-i create clusterroles
 ```
 
-### 2. Pod Security Standards
+## Security Configuration
 
-Create a policy for runner pods:
+### 1. Namespace Security
+When ARC creates the namespace, it should have proper security policies:
 
 ```yaml
 apiVersion: v1
@@ -152,18 +147,20 @@ kind: Namespace
 metadata:
   name: actions-runner-system
   labels:
+    # Kubernetes Pod Security Standards
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ```
 
-### 3. Network Policies (Optional)
+### 2. Network Security (Optional but Recommended)
+If you use NetworkPolicies, create one for runner pods:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: runner-network-policy
+  name: arc-runner-network-policy
   namespace: actions-runner-system
 spec:
   podSelector:
@@ -172,59 +169,101 @@ spec:
   policyTypes:
   - Egress
   egress:
+  # Allow HTTPS and HTTP outbound
   - to: []
     ports:
     - protocol: TCP
       port: 443
     - protocol: TCP
       port: 80
+  # Allow DNS
+  - to: []
+    ports:
     - protocol: UDP
       port: 53
 ```
 
-## ARM64 Specific Setup
-
-### 1. Verify Architecture Support
-
+### 3. Node Security Best Practices
 ```bash
-# Check all nodes are ARM64
-kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.architecture}{"\n"}{end}'
+# Verify nodes are properly secured
+kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kernelVersion}'
+
+# Check for security updates
+kubectl describe nodes | grep -i "kernel\|container\|runtime"
 ```
 
-### 2. Container Image Compatibility
+## Storage Configuration
 
-Ensure your workflow uses ARM64-compatible images:
+### Ephemeral Storage (Default)
+ARC runners use ephemeral storage by default, which is recommended for security:
+
+```bash
+# Verify available storage on nodes
+kubectl describe nodes | grep -A5 -B5 "Allocatable"
+
+# Check ephemeral storage
+kubectl top nodes
+```
+
+### Persistent Storage (Optional)
+If you need persistent tool caches, prepare storage classes:
 
 ```yaml
-# In your workflows, verify images support arm64
-docker manifest inspect alpine:latest
-docker manifest inspect node:18-alpine
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: arc-runner-storage
+provisioner: kubernetes.io/no-provisioner  # Adjust for your cluster
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: true
 ```
 
-### 3. Cross-Platform Builds (Future)
+## Container Image Preparation
 
-If you need to build for AMD64 later:
+### ARM64 Image Compatibility
+Verify that your workflows use ARM64-compatible images:
 
 ```bash
-# Install buildx on runner nodes (optional)
-# This will be handled in the runner configuration
+# Test common images support ARM64
+docker manifest inspect alpine:latest | grep arm64
+docker manifest inspect node:18-alpine | grep arm64
+docker manifest inspect ubuntu:22.04 | grep arm64
+
+# GitHub's runner images are multi-arch and support ARM64
+docker manifest inspect ghcr.io/actions/actions-runner:latest | grep arm64
 ```
 
-## Validation Script
+### Pre-pull Critical Images (Optional)
+For faster startup, consider pre-pulling images on nodes:
 
-Run this script to validate your cluster setup:
+```bash
+# On each node, pre-pull common images
+docker pull ghcr.io/actions/actions-runner:latest
+docker pull alpine:latest
+docker pull ubuntu:22.04
+```
+
+## Validation and Testing
+
+### Cluster Validation Script
+Run this comprehensive validation:
 
 ```bash
 #!/bin/bash
-echo "Validating cluster for GitHub Actions Runners..."
+echo "🔍 Validating cluster for GitHub Actions Runner Controller..."
 
-# Check cluster access
+# 1. Cluster connectivity
+echo "Testing cluster connectivity..."
 if ! kubectl cluster-info > /dev/null 2>&1; then
   echo "❌ Cannot access Kubernetes cluster"
   exit 1
 fi
+echo "✅ Cluster is accessible"
 
-# Check ARM64 nodes
+# 2. ARM64 nodes
+echo "Checking ARM64 nodes..."
 ARM_NODES=$(kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}' | grep -c arm64)
 if [ "$ARM_NODES" -eq 0 ]; then
   echo "❌ No ARM64 nodes found"
@@ -232,59 +271,112 @@ if [ "$ARM_NODES" -eq 0 ]; then
 fi
 echo "✅ Found $ARM_NODES ARM64 nodes"
 
-# Check container runtime
+# 3. Node resources
+echo "Checking node resources..."
+kubectl top nodes || echo "⚠️  Metrics server not available - resource monitoring limited"
+
+# 4. Container runtime
 RUNTIME=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}')
 echo "✅ Container runtime: $RUNTIME"
 
-# Check outbound connectivity
+# 5. Network connectivity
+echo "Testing GitHub connectivity..."
 if kubectl run connectivity-test --image=alpine:latest --rm -i --restart=Never -- wget -q --spider https://api.github.com; then
-  echo "✅ GitHub API accessible"
+  echo "✅ GitHub API is accessible"
 else
-  echo "❌ Cannot reach GitHub API"
+  echo "❌ Cannot reach GitHub API - check firewall/network policies"
 fi
 
-echo "Cluster validation completed!"
+if kubectl run connectivity-test --image=alpine:latest --rm -i --restart=Never -- wget -q --spider https://ghcr.io; then
+  echo "✅ GitHub Container Registry is accessible"
+else
+  echo "❌ Cannot reach GitHub Container Registry"
+fi
+
+# 6. Permissions check
+echo "Checking permissions..."
+if kubectl auth can-i create pods --namespace=actions-runner-system; then
+  echo "✅ Pod creation permissions available"
+else
+  echo "❌ Insufficient permissions for pod creation"
+fi
+
+if kubectl auth can-i create secrets --namespace=actions-runner-system; then
+  echo "✅ Secret creation permissions available"
+else
+  echo "❌ Insufficient permissions for secret creation"
+fi
+
+echo ""
+echo "🎉 Cluster validation completed!"
+echo ""
+echo "Next steps:"
+echo "1. Create GitHub Organization Token with admin:org + repo permissions"
+echo "2. Set up GitHub Environment Protection in your deployment repository"
+echo "3. Deploy ARC using the GitHub Actions workflow"
+echo "4. Test with a simple workflow targeting your runner"
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Permission Denied**
-   ```bash
-   kubectl auth can-i create pods --namespace=actions-runner-system
-   ```
-
-2. **Image Pull Errors**
-   ```bash
-   kubectl describe pod <pod-name> -n actions-runner-system
-   ```
-
-3. **Network Issues**
-   ```bash
-   kubectl exec -it <pod-name> -n actions-runner-system -- nslookup api.github.com
-   ```
-
-### Debug Commands
-
+### Save and run this script:
 ```bash
-# Check node conditions
-kubectl describe nodes
-
-# Check system pods
-kubectl get pods -n kube-system
-
-# Check resource usage
-kubectl top nodes
-kubectl top pods -n actions-runner-system
+# Save as validate-cluster.sh and make executable
+chmod +x validate-cluster.sh
+./validate-cluster.sh
 ```
 
-## Next Steps
+## Common Issues and Fixes
 
-After validating your cluster:
+### Permission Denied Errors
+```bash
+# Check current context and permissions
+kubectl config current-context
+kubectl auth can-i '*' '*' --all-namespaces
 
-1. ✅ Cluster meets requirements
-2. ✅ Permissions configured
-3. ✅ Network connectivity verified
-4. → Proceed with GitHub App setup
-5. → Deploy ARC using the workflow
+# If using managed Kubernetes (EKS, GKE, AKS), ensure you have admin role
+```
+
+### Image Pull Errors
+```bash
+# Check if images can be pulled
+kubectl run test-pull --image=ghcr.io/actions/actions-runner:latest --rm -i --restart=Never
+
+# Check node image cache
+kubectl describe nodes | grep -A10 -B10 "Images"
+```
+
+### Network Connectivity Issues
+```bash
+# Test from a pod in the cluster
+kubectl run debug-pod --image=alpine:latest -it --rm -- /bin/sh
+# Inside pod: ping 8.8.8.8, nslookup api.github.com, wget https://github.com
+
+# Check cluster DNS
+kubectl get pods -n kube-system | grep dns
+kubectl logs -n kube-system -l k8s-app=kube-dns
+```
+
+## Post-Validation Next Steps
+
+After successful validation:
+
+### ✅ Prerequisites Complete
+1. **Cluster Access**: ✅ Verified
+2. **ARM64 Nodes**: ✅ Available  
+3. **Permissions**: ✅ Configured
+4. **Network**: ✅ GitHub accessible
+5. **Container Runtime**: ✅ Ready
+
+### 🚀 Ready for Deployment
+1. **Create Organization Token** with admin:org and repo permissions
+2. **Set up Environment Protection** in your deployment repository
+3. **Deploy ARC** using the provided GitHub Actions workflow
+4. **Test deployment** with the test-runners.yml workflow
+
+### 🔒 Security Checklist
+- [ ] Environment Protection configured in GitHub repository
+- [ ] Branch Protection Rules enabled
+- [ ] Secrets stored at Environment level (not repository level)
+- [ ] Network policies configured (if required)
+- [ ] Node security patches up to date
+
+Your ARM64 Kubernetes cluster is now ready for secure GitHub Actions Runner deployment!
