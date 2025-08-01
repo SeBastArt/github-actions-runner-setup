@@ -122,6 +122,7 @@ jobs:
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
+            --set minRunners=1 \
             --set maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
             --wait \
             --timeout=10m \
