@@ -6,8 +6,8 @@ on:
       runner_replicas:
         description: 'Number of runner replicas'
         required: true
-        default: '2'
-        type: string
+        default: 4
+        type: number
       
   push:
     branches:
