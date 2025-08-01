@@ -17,8 +17,12 @@ maxRunners: 5
 containerMode:
   type: "dind"
 
-# ARM64 node selector
+# ARM64 node selector and container image
 template:
   spec:
     nodeSelector:
       kubernetes.io/arch: arm64
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:latest
+      command: ["/home/runner/run.sh"]
