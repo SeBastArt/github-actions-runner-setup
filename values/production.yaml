@@ -4,9 +4,9 @@
 # Production runner scale set name
 runnerScaleSetName: "production-arm64"
 
-labels:
-  - self-hosted
-  - production-arm64
+# Higher scaling limits for production
+minRunners: 1
+maxRunners: 10
 
 # Production template overrides
 template:
