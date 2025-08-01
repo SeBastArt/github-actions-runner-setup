@@ -120,8 +120,8 @@ jobs:
             --create-namespace \
             --values ./values/base.yaml \
             --values ./values/production.yaml \
-            --set-string githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
-            --set-string githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
+            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
+            --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
             --set maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
             --wait \
             --timeout=10m \
