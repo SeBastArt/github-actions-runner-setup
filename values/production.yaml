@@ -23,11 +23,13 @@ template:
       resources:
         requests:
           cpu: "500m"
-          memory: "1Gi"
+          memory: "2Gi"
         limits:
           cpu: "4000m"
-          memory: "8Gi"
-      
+          memory: "4Gi"
+
       env:
       - name: BUILDX_EXPERIMENTAL
         value: "1"
+      - name: NODE_OPTIONS
+        value: "--max-old-space-size=2048"
