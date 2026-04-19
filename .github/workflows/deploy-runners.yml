@@ -14,8 +14,12 @@ on:
 
 env:
   HELM_VERSION: "3.13.0"
-  # Using latest ARC version for best compatibility and features
-  ARC_VERSION: "0.12.1"
+  # Muss zu der Version des ARC-Controllers passen, der cluster-weit läuft
+  # (gha-runner-scale-set-controller 0.13.1). Ohne --version holt Helm die
+  # latest aus ghcr.io, aktuell 0.14.1 — der 0.13.1 Controller löscht dann
+  # den 0.14.1 Scale-Set sofort mit "Autoscaling runner set version doesn't
+  # match the build version". Upgrade des Controllers braucht cluster-admin.
+  ARC_VERSION: "0.13.1"
 
 # SECURITY: Restricted permissions
 permissions:
@@ -108,6 +112,7 @@ jobs:
           # was der namespaced arc-runner-deployer nicht darf.
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
+            --version ${{ env.ARC_VERSION }} \
             --values ./values/base.yaml \
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
