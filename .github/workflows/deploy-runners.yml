@@ -102,9 +102,12 @@ jobs:
         run: |
           # Deploy production runners with configurable count using values files
           # WITH Docker-in-Docker for container builds
+          # Kein --create-namespace: der NS actions-runner-system existiert
+          # bereits (seit dem ARC-Controller-Install). Helm fragt den
+          # Namespaces-Endpoint trotzdem cluster-scoped an (create-verb),
+          # was der namespaced arc-runner-deployer nicht darf.
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
-            --create-namespace \
             --values ./values/base.yaml \
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
