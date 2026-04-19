@@ -93,14 +93,15 @@ jobs:
         run: |
           echo "${{ secrets.TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
 
-      - name: Install ARC Controller (OCI Registry)
-        run: |
-          helm upgrade --install arc \
-            --namespace actions-runner-system \
-            --create-namespace \
-            --set nodeSelector."kubernetes\.io/arch"=arm64 \
-            --wait \
-            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+      # Der ARC-Controller (gha-runner-scale-set-controller Chart) erzeugt
+      # cluster-scoped ClusterRoles+ClusterRoleBindings und ist damit NICHT
+      # mehr von diesem Workflow verwaltbar — der namespaced arc-runner-deployer
+      # SA darf keine ClusterRoles anfassen (F-001 Least-Privilege).
+      # Der Controller läuft bereits seit 2025-07-30 im Cluster; Upgrades
+      # müssen manuell mit cluster-admin oder über ein zukünftiges
+      # cluster-baseline/charts/arc-controller-Chart erfolgen. Aktueller
+      # Check:
+      #   kubectl get deploy -n actions-runner-system arc-gha-rs-controller
 
       - name: Deploy Runner Scale Set (Production)
         run: |
