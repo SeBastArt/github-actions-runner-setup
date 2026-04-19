@@ -130,8 +130,7 @@ jobs:
           echo "☸️ Testing Kubernetes access (read-only)..."
           if command -v kubectl &> /dev/null; then
             kubectl version --client
-            kubectl cluster-info
-            kubectl get nodes
+            kubectl auth whoami
           else
             echo "kubectl not available - will be installed during workflows"
           fi

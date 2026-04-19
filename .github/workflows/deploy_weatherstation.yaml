@@ -1,0 +1,160 @@
+name: WeatherStation-Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseversion:
+        description: 'Image base version'
+        required: true
+        default: '2.0'
+
+# SECURITY: Restricted permissions
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: production-arm64  # ARC v0.12+ targeting
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security: Verifying WeatherStation deployment runner"
+          echo "Runner: $(hostname)"
+          echo "Architecture: $(uname -m)"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Prepare Version
+        id: prepare
+        run: |
+          # Erstelle eine Version z. B. v1.0.<run_number>
+          VERSION="v${{ github.event.inputs.baseversion }}.${GITHUB_RUN_NUMBER}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    runs-on: production-arm64  # ARC v0.12+ targeting
+    strategy:
+      matrix:
+        component:
+          - name: things
+            image: sebastart/thingsapi
+            dockerfile: ThingsApi/Dockerfile
+            context: src
+          - name: frontend
+            image: sebastart/frontend
+            dockerfile: Frontend/Dockerfile
+            context: src
+          - name: backend
+            image: sebastart/backendapi
+            dockerfile: BackendApi/Dockerfile
+            context: src
+          - name: weather
+            image: sebastart/temperature-dashboard
+            dockerfile: Dockerfile
+            context: src/temperature-dashboard
+    env:
+      DOCKER_TARGET_PLATFORM: linux/arm64
+    steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security: Verifying build runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      # Wait for Docker daemon to be ready
+      - name: Wait for Docker daemon
+        run: |
+          echo "Waiting for Docker daemon to be ready..."
+          timeout 60s bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
+          echo "✅ Docker daemon is ready"
+          docker info
+      - name: Log into Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push ${{ matrix.component.name }} image
+        run: |
+          echo "🔨 Building ${{ matrix.component.name }} natively on ARM64..."
+          
+          # Build image (native ARM64 - no platform flag needed)
+          docker build ${{ matrix.component.context }} \
+            --file ${{ matrix.component.context }}/${{ matrix.component.dockerfile }} \
+            --tag ${{ matrix.component.image }}:${{ needs.prepare.outputs.version }} \
+            --tag ${{ matrix.component.image }}:latest
+          
+          # Push images
+          docker push ${{ matrix.component.image }}:${{ needs.prepare.outputs.version }}
+          docker push ${{ matrix.component.image }}:latest
+          
+          echo "✅ ${{ matrix.component.name }} build complete"
+
+  deploy:
+    needs: [build, prepare]
+    runs-on: production-arm64  # ARC v0.12+ targeting
+    steps:
+      - name: Verify runner security
+        run: |
+          echo "🔐 Security: Verifying deployment runner environment"
+          if [[ "$(uname -m)" != "aarch64" ]]; then
+            echo "❌ Security: Expected ARM64 runner, got $(uname -m)"
+            exit 1
+          fi
+          echo "✅ Security: Running on expected ARM64 self-hosted runner"
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+          
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.12.0'
+          
+      - name: Verify tools installation
+        run: |
+          echo "🔧 Verifying kubectl and helm installation..."
+          kubectl version --client
+          helm version
+          echo "✅ Tools ready for deployment"
+          
+      - name: Configure Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          
+          # Verify connection
+          kubectl auth whoami
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install weatherstation ./helm/weatherstation \
+            --create-namespace \
+            --namespace weatherstation \
+            --set influxdb.secrets.INFLUXDB_INIT_USERNAME="${{ secrets.INFLUXDB_INIT_USERNAME }}" \
+            --set influxdb.secrets.INFLUXDB_INIT_PASSWORD="${{ secrets.INFLUXDB_INIT_PASSWORD }}" \
+            --set influxdb.secrets.INFLUXDB_INIT_ADMIN_TOKEN="${{ secrets.INFLUXDB_INIT_ADMIN_TOKEN }}" \
+            --set backend.secrets.OPEN_WEATHER_MAP_API_KEY="${{ secrets.OPEN_WEATHER_MAP_API_KEY }}" \
+            --set postgres.password="${{ secrets.POSTGRES_PASSWORD }}" \
+            --set backend.imageVersion=${{ needs.prepare.outputs.version }} \
+            --set frontend.imageVersion=${{ needs.prepare.outputs.version }} \
+            --set things.imageVersion=${{ needs.prepare.outputs.version }} \
+            --set weather.imageVersion=${{ needs.prepare.outputs.version }}

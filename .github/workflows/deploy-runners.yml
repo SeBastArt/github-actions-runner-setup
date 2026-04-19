@@ -57,8 +57,7 @@ jobs:
           chmod 600 $HOME/.kube/config
           
           # Verify connection
-          kubectl cluster-info
-          kubectl get nodes
+          kubectl auth whoami
 
       - name: Install cert-manager (required for ARC)
         run: |
