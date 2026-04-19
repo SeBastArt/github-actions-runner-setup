@@ -156,7 +156,8 @@ jobs:
           echo "⚡ Waiting for runner pods to be ready..."
           kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=gha-runner-scale-set -n actions-runner-system --timeout=300s || echo "Timeout waiting for runner pods"
 
-      - name: Run setup verification
-        run: |
-          chmod +x ./scripts/verify-setup.sh
-          ./scripts/verify-setup.sh
+      # verify-setup.sh entfernt: der namespaced arc-runner-deployer darf
+      # keine cluster-scoped Queries (kubectl cluster-info, api-resources,
+      # get nodes) absetzen. Der vorhergehende "Verify deployment"-Step
+      # deckt alle namespaced Checks ab (pods, autoscalingrunnerset,
+      # ephemeralrunnerset, events).
