@@ -63,25 +63,13 @@ jobs:
           # Verify connection
           kubectl auth whoami
 
-      - name: Install cert-manager (required for ARC)
-        run: |
-          # Add cert-manager repo
-          helm repo add jetstack https://charts.jetstack.io
-          helm repo update
-          
-          # Install cert-manager with CRDs
-          helm upgrade --install cert-manager jetstack/cert-manager \
-            --namespace cert-manager \
-            --create-namespace \
-            --set crds.enabled=true \
-            --set nodeSelector."kubernetes\.io/arch"=arm64 \
-            --wait
-          
-          # Wait for cert-manager to be ready
-          kubectl wait --namespace cert-manager \
-            --for=condition=ready pod \
-            --selector=app.kubernetes.io/name=cert-manager \
-            --timeout=300s
+      # cert-manager ist cluster-weite Infrastruktur und wird NICHT mehr
+      # aus diesem Workflow installiert — der namespaced arc-runner-deployer
+      # SA darf keine Secrets in cert-manager anfassen (F-001 Least-Privilege).
+      # cert-manager läuft bereits im Cluster (einmalig manuell aufgesetzt).
+      # Für IaC ist ein cluster-baseline/charts/cert-manager-Chart geplant,
+      # aktuell ist das aber out-of-scope. Check manuell:
+      #   kubectl get pods -n cert-manager
 
       - name: Clean up old repository-level runners
         run: |
