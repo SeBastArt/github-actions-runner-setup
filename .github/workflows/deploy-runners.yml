@@ -8,14 +8,9 @@ on:
         required: true
         default: 4
         type: number
-      
-  push:
-    branches:
-      - main
-      - master  # Added master branch protection
-    paths:
-      - 'helm/**'
-      - '.github/workflows/deploy-runners.yml'
+  # Kein push-Trigger: ein Runner-Deploy soll bewusst gestartet werden,
+  # nicht automatisch bei jedem Workflow-File-Edit. Reine manuelle Kontrolle
+  # via `gh workflow run` oder GitHub-UI.
 
 env:
   HELM_VERSION: "3.13.0"

@@ -6,6 +6,14 @@ githubConfigUrl: ""
 githubConfigSecret:
   github_token: ""
 
+# Expliziter Verweis auf den bestehenden ARC-Controller-SA — ohne diesen
+# Block rendert der Chart mit `lookup "apps/v1" "Deployment" "" ""` und
+# braucht cluster-scoped "list deployments"-Rechte, die der namespaced
+# arc-runner-deployer nicht hat (F-001 Least-Privilege).
+controllerServiceAccount:
+  namespace: actions-runner-system
+  name: arc-gha-rs-controller
+
 # Runner Scale Set name
 runnerScaleSetName: "arm64-runners"
 
