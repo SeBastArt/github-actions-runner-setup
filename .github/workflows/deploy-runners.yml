@@ -24,6 +24,8 @@ env:
 # SECURITY: Restricted permissions
 permissions:
   contents: read
+  # F-004: OIDC gegen k3s-apiserver, User `gha:repo:SeBastArt/github-actions-runner-setup:ref:refs/heads/<branch>`.
+  id-token: write
 
 jobs:
   deploy-arc:
@@ -49,17 +51,46 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Configure kubectl
-        # Kubeconfig wird direkt als YAML in secrets.KUBECONFIG abgelegt
-        # (konsistent mit den anderen 8 Workload-Workflows im Cluster).
-        # Der frühere base64-Decode ist seit der F-001 Phase-2-Migration
-        # überflüssig — manage-deploy-secrets.sh schreibt raw YAML.
+      - name: Configure Kubeconfig via GitHub Actions OIDC
+        # F-004: kurzlebiges JWT von GitHubs OIDC-Issuer, kein secrets.KUBECONFIG
+        # mehr. Der User-Subject wird vom cluster-baseline/charts/deploy-roles
+        # Chart gemanaged: `gha:repo:SeBastArt/github-actions-runner-setup:ref:refs/heads/master`.
+        env:
+          AUDIENCE: https://kubernetes.wetrade.cluster.local
+          K8S_API_SERVER: ${{ vars.K8S_API_SERVER }}
+          K8S_CA_DATA: ${{ vars.K8S_CA_DATA }}
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-          # Verify connection
+          set -euo pipefail
+          TOKEN=$(curl -sSfL \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            | jq -r '.value')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "ERROR: failed to obtain GitHub OIDC token"
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          mkdir -p "$HOME/.kube"
+          cat > "$HOME/.kube/config" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: cluster
+            cluster:
+              server: ${K8S_API_SERVER}
+              certificate-authority-data: ${K8S_CA_DATA}
+          users:
+          - name: gha-oidc
+            user:
+              token: ${TOKEN}
+          contexts:
+          - name: default
+            context:
+              cluster: cluster
+              user: gha-oidc
+          current-context: default
+          EOF
+          chmod 600 "$HOME/.kube/config"
           kubectl auth whoami
 
       # cert-manager ist cluster-weite Infrastruktur und wird NICHT mehr
