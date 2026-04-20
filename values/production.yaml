@@ -18,7 +18,19 @@ template:
     # Higher resource limits and production env vars
     containers:
     - name: runner
-      image: ghcr.io/actions/actions-runner:latest
+      # F-006 (AUDIT-2026-04-19): digest-pin the ARC runner image. `:latest`
+      # from `ghcr.io/actions/*` is an attractive tag-mover target — a
+      # compromised GitHub push-token could seed the cluster with backdoored
+      # runners. Pin the resolved digest; bump the digest together with
+      # upstream security advisories (Dependabot/Renovate-driven).
+      # Digest resolved 2026-04-20 via:
+      #   curl -I -H "Authorization: Bearer $(curl -sfL \
+      #     'https://ghcr.io/token?scope=repository:actions/actions-runner:pull' \
+      #     | python -c 'import json,sys;print(json.load(sys.stdin)["token"])')" \
+      #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
+      #     https://ghcr.io/v2/actions/actions-runner/manifests/latest
+      image: ghcr.io/actions/actions-runner:latest@sha256:b57864c9fcda15ea4a270446aa9cfb108b819a26f6e71fc515f6caf6c27989c6
+      imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
       # F-002 follow-up: 2Gi-Request war zu aggressiv fuer concurrent runs,
       # 5 parallele Jobs konnten nicht eingelastet werden (FailedScheduling).
