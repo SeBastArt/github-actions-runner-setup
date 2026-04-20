@@ -20,10 +20,14 @@ template:
     - name: runner
       image: ghcr.io/actions/actions-runner:latest
       command: ["/home/runner/run.sh"]
+      # F-002 follow-up: 2Gi-Request war zu aggressiv fuer concurrent runs,
+      # 5 parallele Jobs konnten nicht eingelastet werden (FailedScheduling).
+      # 1Gi reicht fuer den Runner-Prozess + evtl. kubectl-exec-Overhead;
+      # die Build-Pods selbst werden separat scheduled (K8s-Mode-Pattern).
       resources:
         requests:
-          cpu: "500m"
-          memory: "2Gi"
+          cpu: "250m"
+          memory: "1Gi"
         limits:
           cpu: "4000m"
           memory: "4Gi"
@@ -33,3 +37,13 @@ template:
         value: "1"
       - name: NODE_OPTIONS
         value: "--max-old-space-size=2048"
+      # F-002: K8s-Mode-Runner blockiert per Default alle Jobs ohne explizites
+      # `container:`-Spec. Dieser Flag erlaubt klassische Jobs, die direkt im
+      # Runner-Pod laufen (wie vor der K8s-Mode-Umstellung). Nötig fuer die
+      # Helm-Deploy-only-Workflows (kubecloud, telemetry-*, arc-runner) und
+      # fuer die Docker-Workflows während der schrittweisen Kaniko-Migration.
+      # Sicherheitsseitig unkritisch, weil der Runner selbst unprivileged
+      # läuft und der DinD-Sidecar weg ist — der Flag ändert nur die Job-
+      # Dispatch-Policy, nicht die Privilegien.
+      - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+        value: "false"
