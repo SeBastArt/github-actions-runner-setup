@@ -21,9 +21,26 @@ runnerScaleSetName: "arm64-runners"
 minRunners: 0
 maxRunners: 5
 
-# Container mode for Docker-in-Docker
+# F-002: Container-Modus auf Kubernetes umgestellt, um den privilegierten
+# DinD-Sidecar zu eliminieren. Der Runner scheduled workflow-Job-Container
+# jetzt als separate K8s-Pods via API statt einen Docker-Daemon lokal zu
+# fahren. Konsequenz fuer Build-Steps: `docker build` funktioniert nicht
+# mehr, weil kein lokaler Docker-Daemon existiert — die Workflows nutzen
+# Kaniko (`gcr.io/kaniko-project/executor`) fuer Image-Builds.
+#
+# Das `kubernetesModeWorkVolumeClaim` definiert den kurzlebigen Workspace-
+# PVC, den jeder Runner-Pod fuer `/home/runner/_work` mountet. `local-path`
+# statt longhorn, weil der Workspace wirklich ephemeral ist (loescht mit
+# dem Runner-Pod am Job-Ende) — kein Sinn, ihn ueber Longhorn-Replicas zu
+# verteilen.
 containerMode:
-  type: "dind"
+  type: "kubernetes"
+  kubernetesModeWorkVolumeClaim:
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: "local-path"
+    resources:
+      requests:
+        storage: 2Gi
 
 # ARM64 node selector and container image
 template:
