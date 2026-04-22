@@ -29,7 +29,7 @@ template:
       #     | python -c 'import json,sys;print(json.load(sys.stdin)["token"])')" \
       #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
       #     https://ghcr.io/v2/actions/actions-runner/manifests/latest
-      image: ghcr.io/actions/actions-runner:latest@sha256:b57864c9fcda15ea4a270446aa9cfb108b819a26f6e71fc515f6caf6c27989c6
+      image: ghcr.io/actions/actions-runner:latest@sha256:b6614fce332517f74d0a76e7c762fb08e4f2ff13dcf333183397c8a5725b6e8e
       imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
       # F-002 follow-up: 2Gi-Request war zu aggressiv fuer concurrent runs,
