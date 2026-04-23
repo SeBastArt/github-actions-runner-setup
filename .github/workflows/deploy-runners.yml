@@ -1,5 +1,11 @@
 name: Deploy GitHub Actions Runners
 
+# Serialize deploys per-repo; GHA concurrency is repo-scoped, so this only
+# gates intra-repo stacking. Cross-repo burst schuetzt der Kaniko-Wait-Bump.
+concurrency:
+  group: cluster-deploy
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
