@@ -21,32 +21,41 @@ runnerScaleSetName: "arm64-runners"
 minRunners: 0
 maxRunners: 5
 
-# F-002: Container-Modus auf Kubernetes umgestellt, um den privilegierten
-# DinD-Sidecar zu eliminieren. Der Runner scheduled workflow-Job-Container
-# jetzt als separate K8s-Pods via API statt einen Docker-Daemon lokal zu
-# fahren. Konsequenz fuer Build-Steps: `docker build` funktioniert nicht
-# mehr, weil kein lokaler Docker-Daemon existiert — die Workflows nutzen
-# Kaniko (`gcr.io/kaniko-project/executor`) fuer Image-Builds.
+# AUDIT 2026-04-26 TOP-09 Phase 2: Wechsel von containerMode.type=kubernetes
+# auf default (leerer string). Hintergrund: K8s-Mode laesst den ARC-Chart
+# eine Role `production-arm64-gha-rs-kube-mode` rendern mit `pods/exec` +
+# `secrets create/get/list/delete` an die Runner-SA — d. h. ein
+# Runner-Compromise (Tag-Mover, boese Workflow-Action) konnte andere
+# Runner-Jobs hijacken oder Secrets im Runner-NS umschreiben.
 #
-# Das `kubernetesModeWorkVolumeClaim` definiert den kurzlebigen Workspace-
-# PVC, den jeder Runner-Pod fuer `/home/runner/_work` mountet. `local-path`
-# statt longhorn, weil der Workspace wirklich ephemeral ist (loescht mit
-# dem Runner-Pod am Job-Ende) — kein Sinn, ihn ueber Longhorn-Replicas zu
-# verteilen.
+# Voraussetzung fuer den Wechsel: keine Workflows nutzen `container:`-Spec
+# (verifiziert via grep ueber alle aktiven Workflows). Kaniko-Builds laufen
+# weiterhin als separate K8s-Pods (von der Workflow gestartet), nicht ueber
+# das Runner-Kube-Mode-Hook. Helm-Deploy-Workflows laufen im Runner-Pod
+# (klassischer Mode).
+#
+# Frueheres `kubernetesModeWorkVolumeClaim` (Workspace-PVC) entfaellt mit
+# dem Mode-Switch — die Workspace-Files leben jetzt im emptyDir des
+# Runner-Pods, was bei kurzlebigen Runs ohnehin das richtige Modell ist.
 containerMode:
-  type: "kubernetes"
-  kubernetesModeWorkVolumeClaim:
-    accessModes: ["ReadWriteOnce"]
-    storageClassName: "local-path"
-    resources:
-      requests:
-        storage: 2Gi
+  type: ""
 
 # ARM64 node selector and container image
 template:
   spec:
     nodeSelector:
       kubernetes.io/arch: arm64
+    # AUDIT 2026-04-26 TOP-09 Phase 2: PSS-baseline-konformer Pod-Level-
+    # securityContext. runAsUser 1001 entspricht dem `runner`-User im
+    # actions-runner-Image (Upstream-Default). seccompProfile RuntimeDefault
+    # blockt eine Reihe Container-Escape-Syscalls (mount, ptrace, kexec).
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
     containers:
     - name: runner
       # F-006 (AUDIT-2026-04-19): digest-pinned. See production.yaml for the
@@ -54,3 +63,13 @@ template:
       image: ghcr.io/actions/actions-runner:latest@sha256:b6614fce332517f74d0a76e7c762fb08e4f2ff13dcf333183397c8a5725b6e8e
       imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
+      # AUDIT 2026-04-26 TOP-09 Phase 2: Container-Level-Hardening.
+      # Caps:[ALL]-Drop ist sicher, weil der Runner als Code-Ausfuehrer
+      # keine Linux-Capabilities braucht — Workflows laufen im selben
+      # Pod oder spawnen separate Build-Pods (Kaniko) ohne Cap-Bedarf.
+      # ROFS bewusst NICHT gesetzt — der Runner muss /home/runner/_work,
+      # /tmp und Cache-Verzeichnisse beschreiben.
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]

@@ -32,6 +32,15 @@ template:
       image: ghcr.io/actions/actions-runner:latest@sha256:b6614fce332517f74d0a76e7c762fb08e4f2ff13dcf333183397c8a5725b6e8e
       imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
+      # AUDIT 2026-04-26 TOP-09 Phase 2: Container-Level-Hardening, Doppelung
+      # zu base.yaml notwendig weil Helm-Values bei `containers` (List) den
+      # Eintrag aus production.yaml die base.yaml-Liste komplett ueberschreibt
+      # (kein Merge auf List-Items). Pod-Level securityContext aus base.yaml
+      # bleibt aktiv (template.spec.securityContext ist eine Map und mergt).
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
       # F-002 follow-up: 2Gi-Request war zu aggressiv fuer concurrent runs,
       # 5 parallele Jobs konnten nicht eingelastet werden (FailedScheduling).
       # 1Gi reicht fuer den Runner-Prozess + evtl. kubectl-exec-Overhead;
