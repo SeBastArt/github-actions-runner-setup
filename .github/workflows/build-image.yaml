@@ -149,8 +149,36 @@ jobs:
           DH_USER: ${{ secrets.dockerhub-username }}
           DH_TOKEN: ${{ secrets.dockerhub-token }}
           GIT_TOKEN: ${{ github.token }}
+          AUDIENCE: ${{ inputs.audience }}
         run: |
           set -euo pipefail
+
+          # OIDC-token refresh. The kubeconfig token from the previous step has
+          # a ~few-minute TTL; a cold build can run >15min, after which every
+          # `kubectl get pod` in the poll loop 401s, PHASE stays Unknown and the
+          # loop runs to the 30min timeout even though the build long since
+          # Succeeded. Refresh the kubeconfig user ("u") token every ~4min so the
+          # poll (and the trap cleanup) keep a valid identity for the whole build.
+          LAST_OIDC_REFRESH=$(date +%s)
+          refresh_oidc() {
+            [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && return 0
+            [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && return 0
+            local fresh
+            fresh=$(curl -sSfL "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" \
+              -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" 2>/dev/null | jq -r '.value' 2>/dev/null) || return 0
+            [ -z "$fresh" ] && return 0
+            [ "$fresh" = "null" ] && return 0
+            echo "::add-mask::$fresh"
+            kubectl config set-credentials u --token="$fresh" >/dev/null 2>&1 || true
+            LAST_OIDC_REFRESH=$(date +%s)
+          }
+          refresh_oidc_if_stale() {
+            local now elapsed
+            now=$(date +%s)
+            elapsed=$((now - LAST_OIDC_REFRESH))
+            [ $elapsed -lt 240 ] || refresh_oidc
+          }
+
           # Name the pod/secret after the IMAGE basename, not the repo. Two
           # jobs in the SAME workflow run (e.g. agent + ibgw-totp) share REPO,
           # GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT — keying on the repo made both
@@ -162,6 +190,10 @@ jobs:
           POD="buildkit-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SECRET="bk-auth-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
+            # Cleanup runs at the end of a possibly >15min step — the start
+            # token is long expired, so force a refresh before the deletes or
+            # they 401 and leak the pod+secret.
+            refresh_oidc
             kubectl -n "$NS" delete pod "$POD" --ignore-not-found --wait=false >/dev/null 2>&1 || true
             kubectl -n "$NS" delete secret "$SECRET" --ignore-not-found --wait=false >/dev/null 2>&1 || true
           }
@@ -231,6 +263,7 @@ jobs:
           echo "Waiting for build pod ${POD} (max ~30min)..."
           PHASE=Unknown
           for i in $(seq 1 360); do
+            refresh_oidc_if_stale
             PHASE=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)
             case "$PHASE" in
               Succeeded) echo "Build pod Succeeded"; break ;;
