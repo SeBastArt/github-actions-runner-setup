@@ -139,7 +139,14 @@ jobs:
           GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          SAFE=$(printf '%s' "${REPO##*/}" | tr '[:upper:]' '[:lower:]')
+          # Name the pod/secret after the IMAGE basename, not the repo. Two
+          # jobs in the SAME workflow run (e.g. agent + ibgw-totp) share REPO,
+          # GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT — keying on the repo made both
+          # compute the identical pod+secret name, so one job's "secret already
+          # exists" failure tripped its trap cleanup, which deleted the shared-
+          # named pod out from under the OTHER job's in-flight build. The image
+          # basename is unique per build (wetrade vs wetrade-ibgw-totp).
+          SAFE=$(printf '%s' "${IMAGE##*/}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | cut -c1-40)
           POD="buildkit-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SECRET="bk-auth-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
