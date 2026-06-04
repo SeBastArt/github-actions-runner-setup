@@ -45,6 +45,11 @@ on:
         required: false
         default: ""
         type: string
+      target:
+        description: "Multi-stage build target to build (empty = the Dockerfile's last stage). Maps to buildctl --opt target."
+        required: false
+        default: ""
+        type: string
       memory-request:
         description: "Build pod memory request. Keep low on memory-tight clusters — it only gates scheduling; the build can burst to memory-limit."
         required: false
@@ -109,6 +114,7 @@ jobs:
       DOCKERFILE: ${{ inputs.dockerfile }}
       BUILD_ARGS: ${{ inputs.build-args }}
       CONTEXT_SUBDIR: ${{ inputs.context-subdir }}
+      TARGET: ${{ inputs.target }}
       MEM_REQUEST: ${{ inputs.memory-request }}
       MEM_LIMIT: ${{ inputs.memory-limit }}
       REPO: ${{ github.repository }}
@@ -224,6 +230,10 @@ jobs:
           CTX="https://github.com/${REPO}.git#${SHA}"
           [ -n "${CONTEXT_SUBDIR}" ] && CTX="${CTX}:${CONTEXT_SUBDIR}"
 
+          # Optional multi-stage target (-> --opt target=<stage>).
+          TGT=""
+          [ -n "${TARGET:-}" ] && TGT=" --opt target=${TARGET}"
+
           # short-lived Secret: registry push-auth (config.json) + git clone token
           echo "::add-mask::$GIT_TOKEN"
           DCFG=$(printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' \
@@ -276,7 +286,7 @@ jobs:
                   - { name: auth, mountPath: /run/bk/git-token, subPath: git-token, readOnly: true }
                 command: ["sh", "-c"]
                 args:
-                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=min --import-cache type=registry,ref=${IMAGE}-cache"
+                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${TGT}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=min --import-cache type=registry,ref=${IMAGE}-cache"
                 resources:
                   requests: { cpu: "500m", memory: "${MEM_REQUEST}" }
                   limits: { cpu: "2000m", memory: "${MEM_LIMIT}" }
