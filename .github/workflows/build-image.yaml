@@ -78,6 +78,17 @@ on:
         required: true
       dockerhub-token:
         required: true
+      build-args-secret:
+        # Additional space-separated KEY=VALUE build-args whose VALUES are
+        # sensitive (e.g. come from a GitHub secret). Passed via secrets: so the
+        # values are masked in logs — unlike the plain build-args input, which a
+        # reusable-workflow caller cannot interpolate secrets into anyway. The
+        # caller constructs the string in its secrets: block, e.g.
+        #   build-args-secret: "FOO=${{ secrets.FOO }} BAR=${{ secrets.BAR }}"
+        # NOTE: build-args are baked into the image; use this only for values
+        # whose presence in the image is acceptable (public NEXT_PUBLIC_* keys),
+        # not for true build-time secrets (those want BuildKit --secret instead).
+        required: false
     outputs:
       digest:
         description: "sha256:... digest of the pushed image"
@@ -150,6 +161,7 @@ jobs:
           DH_TOKEN: ${{ secrets.dockerhub-token }}
           GIT_TOKEN: ${{ github.token }}
           AUDIENCE: ${{ inputs.audience }}
+          BUILD_ARGS_SECRET: ${{ secrets.build-args-secret }}
         run: |
           set -euo pipefail
 
@@ -200,8 +212,11 @@ jobs:
           trap cleanup EXIT
 
           # build-args -> "--opt build-arg:K=V ..." (values must not contain spaces)
+          # Plain (public) args from the input + sensitive-valued args from the
+          # masked build-args-secret. Both are baked into the image.
           BA=""
           for kv in $BUILD_ARGS; do BA="$BA --opt build-arg:$kv"; done
+          for kv in ${BUILD_ARGS_SECRET:-}; do BA="$BA --opt build-arg:$kv"; done
 
           # Git build context. BuildKit clones the repo in-cluster; an optional
           # subdir (`#ref:subdir`) scopes the context root so a Dockerfile that
