@@ -50,6 +50,11 @@ on:
         required: false
         default: ""
         type: string
+      digest-artifact-name:
+        description: "If set, also upload the pushed image digest as an artifact of this name (file <name>.txt). For matrix callers, whose job outputs share one namespace and can't carry per-leg digests — the deploy job downloads digest-* and reads them."
+        required: false
+        default: ""
+        type: string
       memory-request:
         description: "Build pod memory request. Keep low on memory-tight clusters — it only gates scheduling; the build can burst to memory-limit."
         required: false
@@ -115,6 +120,7 @@ jobs:
       BUILD_ARGS: ${{ inputs.build-args }}
       CONTEXT_SUBDIR: ${{ inputs.context-subdir }}
       TARGET: ${{ inputs.target }}
+      DIGEST_ARTIFACT_NAME: ${{ inputs.digest-artifact-name }}
       MEM_REQUEST: ${{ inputs.memory-request }}
       MEM_LIMIT: ${{ inputs.memory-limit }}
       REPO: ${{ github.repository }}
@@ -320,3 +326,15 @@ jobs:
             [ "$attempt" -lt 8 ] && { echo "tag not visible yet, retry $attempt/8 in 15s"; sleep 15; }
           done
           [ -n "$DIGEST" ] || { echo "tag never appeared — push may have failed"; exit 1; }
+
+          # Optionally persist the digest as an artifact for matrix callers whose
+          # job outputs can't carry a per-leg value (see digest-artifact-name).
+          [ -n "${DIGEST_ARTIFACT_NAME:-}" ] && printf '%s' "$DIGEST" > "${GITHUB_WORKSPACE}/${DIGEST_ARTIFACT_NAME}.txt" || true
+
+      - name: Upload digest artifact
+        if: inputs.digest-artifact-name != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ inputs.digest-artifact-name }}
+          path: ${{ inputs.digest-artifact-name }}.txt
+          retention-days: 7
