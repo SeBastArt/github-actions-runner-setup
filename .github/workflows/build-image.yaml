@@ -1,0 +1,225 @@
+name: build-image (reusable, BuildKit)
+
+# Reusable container build for the ARM64 self-hosted runners. Replaces the
+# per-repo "kaniko pod + kubectl exec" pattern that was prone to exec-stream
+# disconnects on multi-minute builds (the exec'd process dies with the stream).
+#
+# How this is robust:
+#   - The build is the BuildKit POD's MAIN process (not an exec child). The CI
+#     just creates the pod and POLLS its phase — a network blip retries a poll,
+#     the build keeps running. No long-lived kubectl-exec stream.
+#   - BuildKit (maintained; Kaniko was archived by Google 2025-06) builds the
+#     repo via a GIT CONTEXT (clones itself in-cluster), so there is no
+#     `tar | kubectl exec` source delivery either.
+#   - Rootless/unprivileged (validated against the cluster admission policies):
+#     runAsUser 1000 + seccomp/AppArmor Unconfined + --oci-worker-no-process-sandbox.
+#   - Registry push-auth and the git clone token are delivered via a SHORT-LIVED
+#     mounted Secret (created + deleted per run), not baked into the pod manifest.
+#
+# Background: cluster-baseline/node-hardening/etcd-dedicated-disk.md and the
+# 2026-06-04 build-pipeline review.
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Target image repository, e.g. sebastart/wetrade"
+        required: true
+        type: string
+      version:
+        description: "Image tag to push, e.g. 1.0.287"
+        required: true
+        type: string
+      dockerfile:
+        description: "Dockerfile path relative to the repo root"
+        required: false
+        default: Dockerfile
+        type: string
+      build-args:
+        description: "Space-separated KEY=VALUE build args (no spaces in values)"
+        required: false
+        default: ""
+        type: string
+      runner:
+        description: "Self-hosted runner label"
+        required: false
+        default: production-arm64
+        type: string
+      k8s-api-server:
+        description: "Kubernetes API server URL (caller passes vars.K8S_API_SERVER)"
+        required: true
+        type: string
+      k8s-ca-data:
+        description: "base64 cluster CA (caller passes vars.K8S_CA_DATA)"
+        required: true
+        type: string
+      audience:
+        description: "OIDC audience for the cluster"
+        required: false
+        default: "https://kubernetes.wetrade.cluster.local"
+        type: string
+    secrets:
+      dockerhub-username:
+        required: true
+      dockerhub-token:
+        required: true
+    outputs:
+      digest:
+        description: "sha256:... digest of the pushed image"
+        value: ${{ jobs.build.outputs.digest }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      digest: ${{ steps.run.outputs.digest }}
+    env:
+      NS: actions-runner-system
+      IMAGE: ${{ inputs.image }}
+      VERSION: ${{ inputs.version }}
+      DOCKERFILE: ${{ inputs.dockerfile }}
+      BUILD_ARGS: ${{ inputs.build-args }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Verify runner architecture
+        run: '[ "$(uname -m)" = "aarch64" ] || { echo "must run on arm64"; exit 1; }'
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+        with:
+          version: 'v1.31.0'
+
+      - name: Configure kubeconfig via GitHub OIDC
+        env:
+          AUDIENCE: ${{ inputs.audience }}
+          K8S_API_SERVER: ${{ inputs.k8s-api-server }}
+          K8S_CA_DATA: ${{ inputs.k8s-ca-data }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sSfL "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "no OIDC token"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          mkdir -p "$HOME/.kube"
+          cat > "$HOME/.kube/config" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: c
+            cluster:
+              server: ${K8S_API_SERVER}
+              certificate-authority-data: ${K8S_CA_DATA}
+          users:
+          - name: u
+            user:
+              token: ${TOKEN}
+          contexts:
+          - name: d
+            context: { cluster: c, user: u, namespace: ${NS} }
+          current-context: d
+          EOF
+          chmod 600 "$HOME/.kube/config"
+          kubectl auth whoami
+
+      - name: Build & push via BuildKit Pod
+        id: run
+        env:
+          DH_USER: ${{ secrets.dockerhub-username }}
+          DH_TOKEN: ${{ secrets.dockerhub-token }}
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SAFE=$(printf '%s' "${REPO##*/}" | tr '[:upper:]' '[:lower:]')
+          POD="buildkit-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SECRET="bk-auth-${SAFE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            kubectl -n "$NS" delete pod "$POD" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+            kubectl -n "$NS" delete secret "$SECRET" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          # build-args -> "--opt build-arg:K=V ..." (values must not contain spaces)
+          BA=""
+          for kv in $BUILD_ARGS; do BA="$BA --opt build-arg:$kv"; done
+
+          # short-lived Secret: registry push-auth (config.json) + git clone token
+          echo "::add-mask::$GIT_TOKEN"
+          DCFG=$(printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' \
+            "$(printf '%s:%s' "$DH_USER" "$DH_TOKEN" | base64 -w0)")
+          kubectl -n "$NS" create secret generic "$SECRET" \
+            --from-literal=config.json="$DCFG" \
+            --from-literal=git-token="$GIT_TOKEN" >/dev/null
+          echo "Secret $SECRET created"
+
+          # BuildKit build pod (rootless, validated admission-safe spec).
+          # buildctl on a single line keeps the manifest free of escaping layers.
+          kubectl -n "$NS" apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: ${POD}
+            namespace: ${NS}
+            labels: { app: buildkit-build }
+          spec:
+            restartPolicy: Never
+            nodeSelector: { kubernetes.io/arch: arm64 }
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+              seccompProfile: { type: Unconfined }
+              appArmorProfile: { type: Unconfined }
+            volumes:
+              - name: auth
+                secret:
+                  secretName: ${SECRET}
+                  items:
+                    - { key: config.json, path: config.json }
+                    - { key: git-token, path: git-token }
+            containers:
+              - name: buildkit
+                image: moby/buildkit@sha256:db7af72d1236f8b995cad4d0e5089327bbe349cccf42bb5de0b2f1e3a30106ff
+                env:
+                  - { name: BUILDKITD_FLAGS, value: "--oci-worker-no-process-sandbox" }
+                  - { name: DOCKER_CONFIG, value: "/home/user/.docker" }
+                volumeMounts:
+                  - { name: auth, mountPath: /home/user/.docker/config.json, subPath: config.json, readOnly: true }
+                  - { name: auth, mountPath: /run/bk/git-token, subPath: git-token, readOnly: true }
+                command: ["sh", "-c"]
+                args:
+                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=https://github.com/${REPO}.git#${SHA} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=max --import-cache type=registry,ref=${IMAGE}-cache"
+                resources:
+                  requests: { cpu: "500m", memory: "1Gi" }
+                  limits: { cpu: "2000m", memory: "3Gi" }
+          EOF
+
+          # Wait for completion by POLLING the pod phase (no exec stream).
+          echo "Waiting for build pod ${POD} (max ~30min)..."
+          PHASE=Unknown
+          for i in $(seq 1 360); do
+            PHASE=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)
+            case "$PHASE" in
+              Succeeded) echo "Build pod Succeeded"; break ;;
+              Failed)    echo "Build pod FAILED"; kubectl -n "$NS" logs "$POD" --tail=120 || true; exit 1 ;;
+            esac
+            sleep 5
+          done
+          [ "$PHASE" = "Succeeded" ] || { echo "Build pod did not finish (phase=$PHASE)"; kubectl -n "$NS" logs "$POD" --tail=120 || true; exit 1; }
+          kubectl -n "$NS" logs "$POD" --tail=40 || true
+
+          # Verify pushed tag + extract digest (read-after-write retry).
+          echo "Verifying ${IMAGE}:${VERSION} in registry..."
+          DIGEST=""
+          for attempt in $(seq 1 8); do
+            REG_TOKEN=$(curl -sfL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${IMAGE}:pull" | jq -r '.token')
+            HDR=$(curl -sfLI "https://index.docker.io/v2/${IMAGE}/manifests/${VERSION}" \
+              -H "Authorization: Bearer ${REG_TOKEN}" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" 2>/dev/null || true)
+            DIGEST=$(printf '%s' "$HDR" | tr -d '\r' | awk 'BEGIN{IGNORECASE=1}/^docker-content-digest:/{print $2}' | tail -1)
+            [ -n "$DIGEST" ] && { echo "Verified: digest=$DIGEST"; echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"; break; }
+            [ "$attempt" -lt 8 ] && { echo "tag not visible yet, retry $attempt/8 in 15s"; sleep 15; }
+          done
+          [ -n "$DIGEST" ] || { echo "tag never appeared — push may have failed"; exit 1; }
