@@ -40,6 +40,11 @@ on:
         required: false
         default: ""
         type: string
+      context-subdir:
+        description: "Subdirectory of the repo to use as the build context root (empty = repo root). dockerfile is relative to this."
+        required: false
+        default: ""
+        type: string
       runner:
         description: "Self-hosted runner label"
         required: false
@@ -82,6 +87,7 @@ jobs:
       VERSION: ${{ inputs.version }}
       DOCKERFILE: ${{ inputs.dockerfile }}
       BUILD_ARGS: ${{ inputs.build-args }}
+      CONTEXT_SUBDIR: ${{ inputs.context-subdir }}
       REPO: ${{ github.repository }}
       SHA: ${{ github.sha }}
     steps:
@@ -146,6 +152,12 @@ jobs:
           BA=""
           for kv in $BUILD_ARGS; do BA="$BA --opt build-arg:$kv"; done
 
+          # Git build context. BuildKit clones the repo in-cluster; an optional
+          # subdir (`#ref:subdir`) scopes the context root so a Dockerfile that
+          # COPYs relative paths (e.g. tools/ib-gateway-totp) resolves correctly.
+          CTX="https://github.com/${REPO}.git#${SHA}"
+          [ -n "${CONTEXT_SUBDIR}" ] && CTX="${CTX}:${CONTEXT_SUBDIR}"
+
           # short-lived Secret: registry push-auth (config.json) + git clone token
           echo "::add-mask::$GIT_TOKEN"
           DCFG=$(printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' \
@@ -190,7 +202,7 @@ jobs:
                   - { name: auth, mountPath: /run/bk/git-token, subPath: git-token, readOnly: true }
                 command: ["sh", "-c"]
                 args:
-                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=https://github.com/${REPO}.git#${SHA} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=max --import-cache type=registry,ref=${IMAGE}-cache"
+                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=max --import-cache type=registry,ref=${IMAGE}-cache"
                 resources:
                   requests: { cpu: "500m", memory: "1Gi" }
                   limits: { cpu: "2000m", memory: "3Gi" }
