@@ -45,6 +45,16 @@ on:
         required: false
         default: ""
         type: string
+      memory-request:
+        description: "Build pod memory request. Keep low on memory-tight clusters — it only gates scheduling; the build can burst to memory-limit."
+        required: false
+        default: "768Mi"
+        type: string
+      memory-limit:
+        description: "Build pod memory limit (hard ceiling; OOM-kills above this)."
+        required: false
+        default: "3Gi"
+        type: string
       runner:
         description: "Self-hosted runner label"
         required: false
@@ -88,6 +98,8 @@ jobs:
       DOCKERFILE: ${{ inputs.dockerfile }}
       BUILD_ARGS: ${{ inputs.build-args }}
       CONTEXT_SUBDIR: ${{ inputs.context-subdir }}
+      MEM_REQUEST: ${{ inputs.memory-request }}
+      MEM_LIMIT: ${{ inputs.memory-limit }}
       REPO: ${{ github.repository }}
       SHA: ${{ github.sha }}
     steps:
@@ -211,8 +223,8 @@ jobs:
                 args:
                   - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=max --import-cache type=registry,ref=${IMAGE}-cache"
                 resources:
-                  requests: { cpu: "500m", memory: "1Gi" }
-                  limits: { cpu: "2000m", memory: "3Gi" }
+                  requests: { cpu: "500m", memory: "${MEM_REQUEST}" }
+                  limits: { cpu: "2000m", memory: "${MEM_LIMIT}" }
           EOF
 
           # Wait for completion by POLLING the pod phase (no exec stream).
