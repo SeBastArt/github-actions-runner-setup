@@ -220,6 +220,14 @@ jobs:
 
           # BuildKit build pod (rootless, validated admission-safe spec).
           # buildctl on a single line keeps the manifest free of escaping layers.
+          # Cache export is mode=min, NOT max: on a memory-tight cluster the
+          # mode=max export of every intermediate (SDK build) layer spiked the
+          # build pod's memory during the export phase and pushed an ~85%-full
+          # node into memory-pressure → TaintManager evicted pods and buildctl
+          # exited non-zero AFTER the image had already pushed (run v1.0.292).
+          # mode=min exports only the final image layers (already pushed), so the
+          # export is near-free; the build-stage cache reuse it gives up is worth
+          # not destabilising the node that also runs the trading workloads.
           kubectl -n "$NS" apply -f - <<EOF
           apiVersion: v1
           kind: Pod
@@ -253,7 +261,7 @@ jobs:
                   - { name: auth, mountPath: /run/bk/git-token, subPath: git-token, readOnly: true }
                 command: ["sh", "-c"]
                 args:
-                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=max --import-cache type=registry,ref=${IMAGE}-cache"
+                  - "buildctl-daemonless.sh build --frontend dockerfile.v0 --opt context=${CTX} --opt filename=${DOCKERFILE}${BA} --secret id=GIT_AUTH_TOKEN,src=/run/bk/git-token --output type=image,name=${IMAGE}:${VERSION},push=true --export-cache type=registry,ref=${IMAGE}-cache,mode=min --import-cache type=registry,ref=${IMAGE}-cache"
                 resources:
                   requests: { cpu: "500m", memory: "${MEM_REQUEST}" }
                   limits: { cpu: "2000m", memory: "${MEM_LIMIT}" }
