@@ -228,8 +228,14 @@ jobs:
           # deps via id=GIT_AUTH_TOKEN keep working.
           echo "::add-mask::$GIT_TOKEN"
           printf '%s' "$GIT_TOKEN" > /tmp/git-token
+          # --provenance=false: push a plain single-arch manifest, not an OCI
+          # index. With the default provenance attestation buildx wraps even a
+          # single platform in an index whose only child is arm64, which then
+          # breaks tools that default to linux/amd64 (e.g. Trivy: "no child with
+          # platform linux/amd64 in index"). This matches the old buildctl output.
           docker buildx build \
             --platform linux/arm64 \
+            --provenance=false \
             -f "${CTX_DIR%/}/$DOCKERFILE" \
             "${TGT[@]}" "${BA[@]}" \
             --secret id=GIT_AUTH_TOKEN,src=/tmp/git-token \
