@@ -99,20 +99,82 @@ on:
         # whose presence in the image is acceptable (public NEXT_PUBLIC_* keys),
         # not for true build-time secrets (those want BuildKit --secret instead).
         required: false
+      gh-billing-token:
+        # Optional fine-grained PAT (resource owner = the org) with
+        # "Organization permissions -> Administration: Read-only" — required by the
+        # enhanced billing usage API. When present, select-runner reads this
+        # month's Actions minutes and prefers GitHub-hosted arm64 (native,
+        # off-cluster, free within the 2,000-min tier). If absent, near the cap, or
+        # the API errors, the build falls back to the self-hosted in-cluster
+        # BuildKit path — so builds never block.
+        required: false
     outputs:
       digest:
         description: "sha256:... digest of the pushed image"
         value: ${{ jobs.build.outputs.digest }}
 
 jobs:
+  # Pick GitHub-hosted arm64 when included Actions minutes remain (cheapest, native
+  # ARM, and off the etcd-bearing k3s cluster); otherwise fall back to the
+  # self-hosted runner + in-cluster BuildKit. Fail-safe by design: no token, API
+  # error, or low minutes => self-hosted, so a build is never blocked.
+  select-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - id: pick
+        env:
+          BILLING_TOKEN: ${{ secrets.gh-billing-token }}
+          ORG: ${{ github.repository_owner }}
+          INCLUDED: "2000" # org plan's included Actions minutes/month
+          BUFFER: "200" # switch to self-hosted once within this of the cap
+          FALLBACK_RUNNER: ${{ inputs.runner }}
+        run: |
+          set -euo pipefail
+          runner="$FALLBACK_RUNNER"; mode=incluster
+          if [ -n "${BILLING_TOKEN:-}" ]; then
+            # Enhanced billing usage report for the current month. Needs
+            # Administration:read; the legacy settings/billing/actions endpoint is
+            # gone (HTTP 410) for orgs on enhanced billing.
+            Y=$(date -u +%Y); M=$(date -u +%-m)
+            resp=$(curl -sfL \
+              -H "Authorization: Bearer ${BILLING_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/organizations/${ORG}/settings/billing/usage?year=${Y}&month=${M}" || true)
+            used=$(printf '%s' "$resp" | jq -r '
+              [ .usageItems[]?
+                | select((.product|ascii_downcase) == "actions")
+                | select((.unitType|ascii_downcase) | test("minute"))
+                | .quantity ] | add // empty' 2>/dev/null || true)
+            if [ -n "$used" ]; then
+              thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
+              if awk "BEGIN{exit !($used < $thresh)}"; then
+                runner=ubuntu-24.04-arm; mode=buildx
+              fi
+              printf 'Actions minutes used this month: %.0f / %s (buffer %s) -> %s (%s)\n' "$used" "$INCLUDED" "$BUFFER" "$runner" "$mode"
+            else
+              echo "Billing usage API returned no usable data; using self-hosted fallback (${runner})."
+            fi
+          else
+            echo "No gh-billing-token; using self-hosted (${runner})."
+          fi
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
   build:
-    runs-on: ${{ inputs.runner }}
+    needs: select-runner
+    runs-on: ${{ needs.select-runner.outputs.runner }}
     permissions:
       id-token: write
       contents: read
     outputs:
-      digest: ${{ steps.run.outputs.digest }}
+      # Coalesce: in-cluster path uses step id "run", buildx path uses "buildx".
+      digest: ${{ steps.run.outputs.digest || steps.buildx.outputs.digest }}
     env:
+      MODE: ${{ needs.select-runner.outputs.mode }}
       NS: actions-runner-system
       IMAGE: ${{ inputs.image }}
       VERSION: ${{ inputs.version }}
@@ -129,12 +191,72 @@ jobs:
       - name: Verify runner architecture
         run: '[ "$(uname -m)" = "aarch64" ] || { echo "must run on arm64"; exit 1; }'
 
+      # ===== GitHub-hosted path (mode=buildx): native arm64 docker buildx =====
+      - name: Checkout (buildx)
+        if: env.MODE == 'buildx'
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Buildx
+        if: env.MODE == 'buildx'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to Docker Hub (buildx)
+        if: env.MODE == 'buildx'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.dockerhub-username }}
+          password: ${{ secrets.dockerhub-token }}
+
+      - name: Build & push (buildx)
+        id: buildx
+        if: env.MODE == 'buildx'
+        env:
+          GIT_TOKEN: ${{ github.token }}
+          BUILD_ARGS_SECRET: ${{ secrets.build-args-secret }}
+        run: |
+          set -euo pipefail
+          CTX_DIR="${CONTEXT_SUBDIR:-.}"
+          # build-args (plain + sensitive) -> --build-arg flags (values no spaces)
+          BA=()
+          for kv in $BUILD_ARGS; do BA+=(--build-arg "$kv"); done
+          for kv in ${BUILD_ARGS_SECRET:-}; do BA+=(--build-arg "$kv"); done
+          TGT=()
+          [ -n "${TARGET:-}" ] && TGT=(--target "$TARGET")
+          # Mirror the in-cluster BuildKit secret so Dockerfiles that pull private
+          # deps via id=GIT_AUTH_TOKEN keep working.
+          echo "::add-mask::$GIT_TOKEN"
+          printf '%s' "$GIT_TOKEN" > /tmp/git-token
+          docker buildx build \
+            --platform linux/arm64 \
+            -f "${CTX_DIR%/}/$DOCKERFILE" \
+            "${TGT[@]}" "${BA[@]}" \
+            --secret id=GIT_AUTH_TOKEN,src=/tmp/git-token \
+            --cache-from "type=registry,ref=${IMAGE}-cache" \
+            --cache-to "type=registry,ref=${IMAGE}-cache,mode=min" \
+            -t "${IMAGE}:${VERSION}" \
+            --push \
+            --metadata-file /tmp/bk-meta.json \
+            "$CTX_DIR"
+          rm -f /tmp/git-token
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/bk-meta.json)
+          [ -n "$DIGEST" ] && [ "$DIGEST" != "null" ] || { echo "no digest from buildx"; exit 1; }
+          echo "Built ${IMAGE}:${VERSION} -> ${DIGEST}"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          if [ -n "${DIGEST_ARTIFACT_NAME:-}" ]; then
+            printf '%s' "$DIGEST" > "${GITHUB_WORKSPACE}/${DIGEST_ARTIFACT_NAME}.txt"
+          fi
+
+      # ===== Self-hosted fallback path (mode=incluster): existing BuildKit pod =====
       - name: Setup kubectl
+        if: env.MODE == 'incluster'
         uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
         with:
           version: 'v1.31.0'
 
       - name: Configure kubeconfig via GitHub OIDC
+        if: env.MODE == 'incluster'
         env:
           AUDIENCE: ${{ inputs.audience }}
           K8S_API_SERVER: ${{ inputs.k8s-api-server }}
@@ -168,6 +290,7 @@ jobs:
 
       - name: Build & push via BuildKit Pod
         id: run
+        if: env.MODE == 'incluster'
         env:
           DH_USER: ${{ secrets.dockerhub-username }}
           DH_TOKEN: ${{ secrets.dockerhub-token }}
