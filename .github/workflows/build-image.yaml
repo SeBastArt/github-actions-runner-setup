@@ -100,11 +100,13 @@ on:
         # not for true build-time secrets (those want BuildKit --secret instead).
         required: false
       gh-billing-token:
-        # Optional PAT with org "billing:read". When present, the select-runner
-        # job checks remaining included Actions minutes and prefers GitHub-hosted
-        # arm64 (native, off-cluster, free within the 2,000 min tier). If absent,
-        # the minutes are low, or the API call fails, the build falls back to the
-        # self-hosted in-cluster BuildKit path — so builds never block.
+        # Optional fine-grained PAT (resource owner = the org) with
+        # "Organization permissions -> Administration: Read-only" — required by the
+        # enhanced billing usage API. When present, select-runner reads this
+        # month's Actions minutes and prefers GitHub-hosted arm64 (native,
+        # off-cluster, free within the 2,000-min tier). If absent, near the cap, or
+        # the API errors, the build falls back to the self-hosted in-cluster
+        # BuildKit path — so builds never block.
         required: false
     outputs:
       digest:
@@ -126,27 +128,35 @@ jobs:
         env:
           BILLING_TOKEN: ${{ secrets.gh-billing-token }}
           ORG: ${{ github.repository_owner }}
-          BUFFER: "200"
+          INCLUDED: "2000" # org plan's included Actions minutes/month
+          BUFFER: "200" # switch to self-hosted once within this of the cap
           FALLBACK_RUNNER: ${{ inputs.runner }}
         run: |
           set -euo pipefail
           runner="$FALLBACK_RUNNER"; mode=incluster
           if [ -n "${BILLING_TOKEN:-}" ]; then
+            # Enhanced billing usage report for the current month. Needs
+            # Administration:read; the legacy settings/billing/actions endpoint is
+            # gone (HTTP 410) for orgs on enhanced billing.
+            Y=$(date -u +%Y); M=$(date -u +%-m)
             resp=$(curl -sfL \
               -H "Authorization: Bearer ${BILLING_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/orgs/${ORG}/settings/billing/actions" || true)
-            inc=$(printf '%s' "$resp" | jq -r '.included_minutes // empty' 2>/dev/null || true)
-            used=$(printf '%s' "$resp" | jq -r '.total_minutes_used // empty' 2>/dev/null || true)
-            if [ -n "$inc" ] && [ -n "$used" ]; then
-              rem=$(awk "BEGIN{printf \"%.0f\", $inc-$used}")
-              if awk "BEGIN{exit !(($inc-$used) > $BUFFER)}"; then
+              "https://api.github.com/organizations/${ORG}/settings/billing/usage?year=${Y}&month=${M}" || true)
+            used=$(printf '%s' "$resp" | jq -r '
+              [ .usageItems[]?
+                | select((.product|ascii_downcase) == "actions")
+                | select((.unitType|ascii_downcase) | test("minute"))
+                | .quantity ] | add // empty' 2>/dev/null || true)
+            if [ -n "$used" ]; then
+              thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
+              if awk "BEGIN{exit !($used < $thresh)}"; then
                 runner=ubuntu-24.04-arm; mode=buildx
               fi
-              echo "Included Actions minutes remaining: ${rem} (buffer ${BUFFER}) -> ${runner} (${mode})"
+              printf 'Actions minutes used this month: %.0f / %s (buffer %s) -> %s (%s)\n' "$used" "$INCLUDED" "$BUFFER" "$runner" "$mode"
             else
-              echo "Billing API returned no usable data; using self-hosted fallback (${runner})."
+              echo "Billing usage API returned no usable data; using self-hosted fallback (${runner})."
             fi
           else
             echo "No gh-billing-token; using self-hosted (${runner})."
