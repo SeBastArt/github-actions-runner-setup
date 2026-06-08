@@ -121,6 +121,10 @@ jobs:
   # error, or low minutes => self-hosted, so a build is never blocked.
   select-runner:
     runs-on: ubuntu-latest
+    # Job-level env: the `secrets` context is NOT available in a step `if:`, but
+    # `env` is — so map the token here to gate the Bitwarden fetch on its presence.
+    env:
+      BWS_TOKEN: ${{ secrets.gh-billing-token }}
     outputs:
       runner: ${{ steps.pick.outputs.runner }}
       mode: ${{ steps.pick.outputs.mode }}
@@ -129,10 +133,10 @@ jobs:
       # (passed as gh-billing-token). sm-action exports it as the masked env var
       # BILLING_TOKEN for the next step. Skipped if no token -> self-hosted.
       - name: Fetch billing token (Bitwarden)
-        if: ${{ secrets.gh-billing-token != '' }}
+        if: env.BWS_TOKEN != ''
         uses: bitwarden/sm-action@27c0c9dcab679d7250dbab91227c85b49ffa5e0f # v3.0.0
         with:
-          access_token: ${{ secrets.gh-billing-token }}
+          access_token: ${{ env.BWS_TOKEN }}
           secrets: |
             f752cc65-9bed-48cd-8431-b46300521a3b > BILLING_TOKEN
       - id: pick
