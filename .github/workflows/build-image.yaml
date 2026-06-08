@@ -100,13 +100,14 @@ on:
         # not for true build-time secrets (those want BuildKit --secret instead).
         required: false
       gh-billing-token:
-        # Optional fine-grained PAT (resource owner = the org) with
-        # "Organization permissions -> Administration: Read-only" — required by the
-        # enhanced billing usage API. When present, select-runner reads this
+        # Bitwarden Secrets Manager machine-account ACCESS TOKEN (read-only on a
+        # project holding only the billing PAT). select-runner fetches the actual
+        # PAT from Bitwarden at runtime (bitwarden/sm-action), then reads this
         # month's Actions minutes and prefers GitHub-hosted arm64 (native,
-        # off-cluster, free within the 2,000-min tier). If absent, near the cap, or
-        # the API errors, the build falls back to the self-hosted in-cluster
-        # BuildKit path — so builds never block.
+        # off-cluster, free within the 2,000-min tier). The PAT lives ONLY in
+        # Bitwarden (one place to rotate); GitHub Free can't share org secrets to
+        # private repos, so this static BWS token sits per-repo. Absent / API error
+        # => self-hosted in-cluster fallback, so builds never block.
         required: false
     outputs:
       digest:
@@ -124,9 +125,18 @@ jobs:
       runner: ${{ steps.pick.outputs.runner }}
       mode: ${{ steps.pick.outputs.mode }}
     steps:
+      # Fetch the billing PAT from Bitwarden using the machine-account access token
+      # (passed as gh-billing-token). sm-action exports it as the masked env var
+      # BILLING_TOKEN for the next step. Skipped if no token -> self-hosted.
+      - name: Fetch billing token (Bitwarden)
+        if: ${{ secrets.gh-billing-token != '' }}
+        uses: bitwarden/sm-action@27c0c9dcab679d7250dbab91227c85b49ffa5e0f # v3.0.0
+        with:
+          access_token: ${{ secrets.gh-billing-token }}
+          secrets: |
+            f752cc65-9bed-48cd-8431-b46300521a3b > BILLING_TOKEN
       - id: pick
         env:
-          BILLING_TOKEN: ${{ secrets.gh-billing-token }}
           ORG: ${{ github.repository_owner }}
           INCLUDED: "2000" # org plan's included Actions minutes/month
           BUFFER: "200" # switch to self-hosted once within this of the cap
@@ -159,7 +169,7 @@ jobs:
               echo "Billing usage API returned no usable data; using self-hosted fallback (${runner})."
             fi
           else
-            echo "No gh-billing-token; using self-hosted (${runner})."
+            echo "No billing token (Bitwarden access token absent); using self-hosted (${runner})."
           fi
           echo "runner=$runner" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
