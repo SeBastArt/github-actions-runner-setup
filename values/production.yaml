@@ -12,8 +12,16 @@ maxRunners: 10
 template:
   spec:
     # ARM64 node selector (from base.yaml)
+    # 2026-06-11: zusaetzlich nodepool=worker — Runner (und die separat
+    # gescheduleten kaniko-Build-Pods, s. cluster-baseline kyverno-policy
+    # pin-kaniko-builds-to-worker) laufen NUR auf dem dedizierten Worker-Node
+    # (kein etcd), damit Build-I/O nie die geteilte Disk-Queue saettigt und
+    # etcd-fsync stallt -> API-Flap. Worker = node-13 (k3s agent, Label
+    # nodepool=worker). NICHT in base.yaml, weil Test-Runner keinen solchen
+    # Node haben (sonst FailedScheduling).
     nodeSelector:
       kubernetes.io/arch: arm64
+      nodepool: worker
       
     # Higher resource limits and production env vars
     containers:
