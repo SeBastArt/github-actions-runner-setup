@@ -14,13 +14,25 @@
 #
 # Run this script only to set up a new repo or rotate the BWS access token itself.
 #
+# WHERE the BWS access token itself lives: als Login/Secure-Note im Bitwarden
+# PASSWORD MANAGER (normaler Tresor, Eintrag "BWS Access Token ci-github") —
+# NICHT im Secrets Manager, dessen Zugang er ja gerade aufschliesst. Er ist
+# ausserdem jederzeit regenerierbar: Secrets Manager -> Maschinenkonten ->
+# ci-github-Konto -> neuen Access-Token erzeugen, dann dieses Script einmal
+# laufen lassen (alte Tokens dabei im Maschinenkonto widerrufen).
+#
 # Usage:
 #   scripts/set-billing-token.sh <bws-access-token>
 #   scripts/set-billing-token.sh            # reads the token from stdin (hidden)
 set -euo pipefail
 
 ORG="wondering-developer"
-REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan)
+# 2026-07-02: WeLink ergaenzt — hatte das Secret nur manuell gesetzt und waere
+# bei der naechsten Rotation still uebersprungen worden (Fallback = in-cluster-
+# Builds, s. build-image.yaml select-runner). HoneyPal fehlte das Secret am
+# 2026-07-02 komplett (einziges Repo mit in-cluster-Builds); nach Neu-Setzen
+# per Re-Run verifiziert: build-Jobs wieder auf ubuntu-24.04-arm.
+REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink)
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
