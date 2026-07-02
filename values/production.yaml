@@ -37,7 +37,11 @@ template:
       #     | python -c 'import json,sys;print(json.load(sys.stdin)["token"])')" \
       #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
       #     https://ghcr.io/v2/actions/actions-runner/manifests/latest
-      image: ghcr.io/actions/actions-runner:latest@sha256:08c30b0a7105f64bddfc485d2487a22aa03932a791402393352fdf674bda2c29
+      # 2026-07-02: eigenes derived Image (runner-image/Dockerfile: upstream
+      # actions-runner + gettext-base/envsubst fuer cosign-installer v4).
+      # Upstream-Base-Digest bleibt im Dockerfile gepinnt; dieses Image via
+      # build-runner-image.yaml bauen und hier den neuen Digest pinnen.
+      image: ghcr.io/sebastart/actions-runner:latest@sha256:6ba8b517474286973271a9c0098602b38a21e1768c478a6173789abf43ffcba8
       imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
       # AUDIT 2026-04-26 TOP-09 Phase 2: Container-Level-Hardening, Doppelung
