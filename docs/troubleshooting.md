@@ -319,6 +319,11 @@ template:
           memory: "8Gi"
 
 # More parallel runners
+# ACHTUNG (2026-08-26): minRunners > 0 haelt warme Runner vor, die dauerhaft
+# je 1Gi Memory-Request auf node-13 binden — dem einzigen Node mit
+# `nodepool: worker`. Der Node ist request-saturiert; ein warmer Standby hat
+# den worker-headroom-Balloon verdraengt. Baseline ist minRunners: 0.
+# Nur erhoehen, wenn node-13-Kapazitaet dafuer da ist.
 maxRunners: 10
 minRunners: 2
 

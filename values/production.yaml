@@ -5,7 +5,16 @@
 runnerScaleSetName: "production-arm64"
 
 # Higher scaling limits for production
-minRunners: 1
+# 2026-08-26: minRunners 1 -> 0. Builds laufen regulaer auf GitHub-hosted
+# Runnern; dieses Scale-Set ist nur noch Fallback, wenn das Billing-Budget
+# erschoepft ist (siehe GH_BILLING_TOKEN-Pfad in den Build-Workflows).
+# Ein warmer Standby-Runner kostete dauerhaft 1Gi Memory-Request auf node-13,
+# dem einzigen Node mit `nodepool: worker` — gemessen 93,3 % Request-Buchung
+# bei nur 68,8 % echter RAM-Nutzung, und der worker-headroom-Balloon passte
+# nicht mehr drauf (Pending). Der Standby-Runner selbst hat in 14 Tagen real
+# 6 MiB benutzt. Kosten von minRunners=0: ~30 s Anlaufzeit beim seltenen
+# Fallback-Build (scale-from-zero).
+minRunners: 0
 maxRunners: 10
 
 # Production template overrides

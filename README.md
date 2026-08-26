@@ -138,7 +138,7 @@ graph LR
 ### Runner Scaling
 ```yaml
 # values/production.yaml
-minRunners: 1        # Always-on runners
+minRunners: 0        # scale-from-zero (Fallback; Builds laufen GitHub-hosted)
 maxRunners: 10       # Maximum concurrent runners
 ```
 

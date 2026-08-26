@@ -147,6 +147,12 @@ jobs:
           # bereits (seit dem ARC-Controller-Install). Helm fragt den
           # Namespaces-Endpoint trotzdem cluster-scoped an (create-verb),
           # was der namespaced arc-runner-deployer nicht darf.
+          # minRunners wird BEWUSST nicht mehr per --set gesetzt: ein --set
+          # schlaegt jede Values-Datei, d. h. eine Aenderung in
+          # values/production.yaml waere hier still wirkungslos geblieben.
+          # Der Wert steht jetzt allein in values/production.yaml (0 =
+          # scale-from-zero, Fallback-Betrieb). maxRunners bleibt am --set,
+          # weil es bewusst pro Deploy-Run ueber den Input steuerbar ist.
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --version ${{ env.ARC_VERSION }} \
@@ -154,7 +160,6 @@ jobs:
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set minRunners=1 \
             --set maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
             --wait \
             --timeout=10m \
