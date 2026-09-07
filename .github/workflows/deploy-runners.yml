@@ -151,8 +151,25 @@ jobs:
           # schlaegt jede Values-Datei, d. h. eine Aenderung in
           # values/production.yaml waere hier still wirkungslos geblieben.
           # Der Wert steht jetzt allein in values/production.yaml (0 =
-          # scale-from-zero, Fallback-Betrieb). maxRunners bleibt am --set,
+          # scale-from-zero, Fallback-Betrieb). maxRunners bleibt am Flag,
           # weil es bewusst pro Deploy-Run ueber den Input steuerbar ist.
+          #
+          # 2026-09-07: maxRunners MUSS `--set-json` sein, nicht `--set`.
+          # Das Chart vergleicht in autoscalingrunnerset.yaml:128
+          # `gt .Values.minRunners .Values.maxRunners`. `--set` parst 4 als
+          # int64, eine Values-Datei parst `minRunners: 0` als float64 — Go's
+          # `gt` kann die beiden nicht vergleichen und bricht mit
+          # "incompatible types for comparison" ab. Solange BEIDE Werte per
+          # --set kamen (bis 9842e69), fiel das nicht auf; erst das Verschieben
+          # von minRunners in die Values-Datei machte die Typen gemischt.
+          # `--set-json` liefert eine JSON-Zahl (float64) und passt damit zur
+          # Values-Datei. Verifiziert per `helm template`: rendert
+          # minRunners: 0 / maxRunners: 4.
+          # WARNUNG: Der Fehler trat erst beim Rendern auf, also NACHDEM
+          # `helm upgrade --install` die bestehende Release angefasst hatte —
+          # der fehlgeschlagene Lauf hat das AutoscalingRunnerSet mitgerissen.
+          # Ein Deploy dieses Charts ist nicht folgenlos-idempotent; vor
+          # Aenderungen an den Werten immer erst `helm template` lokal fahren.
           helm upgrade --install arm64-runners \
             --namespace actions-runner-system \
             --version ${{ env.ARC_VERSION }} \
@@ -160,7 +177,7 @@ jobs:
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
+            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
