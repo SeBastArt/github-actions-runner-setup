@@ -1,0 +1,100 @@
+name: select-runner (reusable)
+
+# Picks the runner for NON-build jobs (deploys): GitHub-hosted arm64 while the
+# org's included Actions minutes last, the in-cluster ARC scale set only as a
+# fallback once they are nearly used up.
+#
+# Why: deploy jobs were hard-wired to `production-arm64`. Its runner pods are
+# pinned to the single worker node (node-13) and request 1Gi each; when node-13
+# is request-saturated, every deploy sits `queued` with "Preemption is not
+# helpful" (2026-09-15, 2026-09-26). Deploys do not need to run in-cluster: the
+# kube-apiserver (6443) is public and the OIDC JWT is issued by GitHub, which
+# works the same on hosted runners.
+#
+# Same decision as the select-runner job in build-image.yaml (kept there as-is so
+# builds are not touched by this change). Keep INCLUDED/BUFFER in sync.
+#
+# Fail-safe: no token, API error or low minutes => fallback runner, so a deploy
+# is never blocked.
+#
+# Usage:
+#   jobs:
+#     select-runner:
+#       uses: SeBastArt/github-actions-runner-setup/.github/workflows/select-runner.yaml@<sha>
+#       secrets:
+#         gh-billing-token: ${{ secrets.GH_BILLING_TOKEN }}
+#     deploy:
+#       needs: select-runner
+#       runs-on: ${{ needs.select-runner.outputs.runner }}
+
+on:
+  workflow_call:
+    inputs:
+      fallback-runner:
+        description: "Runner label used when minutes are (nearly) exhausted or unknown"
+        required: false
+        default: production-arm64
+        type: string
+    secrets:
+      gh-billing-token:
+        # Bitwarden Secrets Manager machine-account ACCESS TOKEN, same secret as
+        # build-image.yaml (per repo: GH_BILLING_TOKEN, set via
+        # scripts/set-billing-token.sh). Absent => fallback runner.
+        required: false
+    outputs:
+      runner:
+        description: "ubuntu-24.04-arm or the fallback runner"
+        value: ${{ jobs.select.outputs.runner }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    env:
+      BWS_TOKEN: ${{ secrets.gh-billing-token }}
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - name: Fetch billing token (Bitwarden)
+        if: env.BWS_TOKEN != ''
+        uses: bitwarden/sm-action@1238aae8fc64b212641190a9227c8a734ab1a793 # v3.0.1
+        with:
+          access_token: ${{ env.BWS_TOKEN }}
+          secrets: |
+            f752cc65-9bed-48cd-8431-b46300521a3b > BILLING_TOKEN
+      - id: pick
+        env:
+          ORG: ${{ github.repository_owner }}
+          INCLUDED: "2000" # org plan's included Actions minutes/month
+          BUFFER: "200" # switch to the fallback once within this of the cap
+          FALLBACK_RUNNER: ${{ inputs.fallback-runner }}
+        run: |
+          set -euo pipefail
+          runner="$FALLBACK_RUNNER"
+          if [ -n "${BILLING_TOKEN:-}" ]; then
+            Y=$(date -u +%Y); M=$(date -u +%-m)
+            resp=$(curl -sfL \
+              -H "Authorization: Bearer ${BILLING_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/organizations/${ORG}/settings/billing/usage?year=${Y}&month=${M}" || true)
+            used=$(printf '%s' "$resp" | jq -r '
+              [ .usageItems[]?
+                | select((.product|ascii_downcase) == "actions")
+                | select((.unitType|ascii_downcase) | test("minute"))
+                | .quantity ] | add // empty' 2>/dev/null || true)
+            if [ -n "$used" ]; then
+              thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
+              if awk "BEGIN{exit !($used < $thresh)}"; then
+                runner=ubuntu-24.04-arm
+              fi
+              printf 'Actions minutes used this month: %.0f / %s (buffer %s) -> %s\n' "$used" "$INCLUDED" "$BUFFER" "$runner"
+            else
+              echo "Billing usage API returned no usable data; using fallback (${runner})."
+            fi
+          else
+            echo "No billing token (GH_BILLING_TOKEN absent); using fallback (${runner})."
+          fi
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
