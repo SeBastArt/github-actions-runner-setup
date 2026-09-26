@@ -32,7 +32,9 @@ ORG="wondering-developer"
 # Builds, s. build-image.yaml select-runner). HoneyPal fehlte das Secret am
 # 2026-07-02 komplett (einziges Repo mit in-cluster-Builds); nach Neu-Setzen
 # per Re-Run verifiziert: build-Jobs wieder auf ubuntu-24.04-arm.
-REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink)
+# 2026-09-26: telemetry-stack ergaenzt — Deploys waehlen den Runner jetzt ueber
+# select-runner.yaml (hosted arm64, in-cluster nur als Fallback).
+REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink telemetry-stack)
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
