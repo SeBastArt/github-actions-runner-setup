@@ -34,7 +34,8 @@ ORG="wondering-developer"
 # per Re-Run verifiziert: build-Jobs wieder auf ubuntu-24.04-arm.
 # 2026-09-26: telemetry-stack ergaenzt — Deploys waehlen den Runner jetzt ueber
 # select-runner.yaml (hosted arm64, in-cluster nur als Fallback).
-REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink telemetry-stack)
+# 2026-09-28: claude-agent ergaenzt (Cluster-Agent, baut per build-image.yaml).
+REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink telemetry-stack claude-agent)
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
