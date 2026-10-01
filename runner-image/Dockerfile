@@ -11,10 +11,18 @@
 # (Tag-Mover-Schutz, s. Kommentar dort). Beim Upstream-Digest-Bump: hier
 # aktualisieren, Workflow build-runner-image.yaml dispatchen, neuen eigenen
 # Digest in values/ pinnen, deploy-runners.yml dispatchen.
+#
+# 2026-10-01: CI-Fallback. Die CI-Workflows aller Repos laufen jetzt ueber
+# select-runner und landen bei Minutenmangel hier. Im upstream-Image fehlen
+# dafuer node (Lint-Skripte), pip3, zip; setup-dotnet installiert per Default
+# nach /usr/share/dotnet, das der Nicht-root-User runner nicht anlegen darf
+# (Test-Run weatherstation 36873608126: "mkdir: Permission denied").
+# DOTNET_INSTALL_DIR lenkt setup-dotnet in ein beschreibbares Verzeichnis.
 FROM ghcr.io/actions/actions-runner:latest@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
 
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gettext-base \
+ && apt-get install -y --no-install-recommends gettext-base nodejs python3-pip zip \
  && rm -rf /var/lib/apt/lists/*
 USER runner
+ENV DOTNET_INSTALL_DIR=/home/runner/.dotnet
