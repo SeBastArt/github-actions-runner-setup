@@ -30,6 +30,11 @@ RUN apt-get update \
 # `npm install` auf -> "npm: not found", Run 36878169719). Gepinnt + sha256.
 ARG NODE_VERSION=v22.23.3
 ARG NODE_SHA256=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
-RUN curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.xz" \n && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \n && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --exclude CHANGELOG.md --exclude LICENSE --exclude README.md \n && rm /tmp/node.tar.xz \n && node --version && npm --version
+RUN curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.xz" \
+ && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+ && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+      --exclude CHANGELOG.md --exclude LICENSE --exclude README.md \
+ && rm /tmp/node.tar.xz \
+ && node --version && npm --version
 USER runner
 ENV DOTNET_INSTALL_DIR=/home/runner/.dotnet
