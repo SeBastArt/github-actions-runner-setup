@@ -35,7 +35,9 @@ ORG="wondering-developer"
 # 2026-09-26: telemetry-stack ergaenzt — Deploys waehlen den Runner jetzt ueber
 # select-runner.yaml (hosted arm64, in-cluster nur als Fallback).
 # 2026-09-28: claude-agent ergaenzt (Cluster-Agent, baut per build-image.yaml).
-REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink telemetry-stack claude-agent)
+# 2026-10-01: cluster-baseline + kubecloud ergaenzt — deren CI laeuft jetzt
+# ueber select-runner; ohne Token landete sie dauerhaft im Cluster.
+REPOS=(weRead WeTrade HoneyPal adoryn weatherstation WePlan WeLink telemetry-stack claude-agent cluster-baseline kubecloud)
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
