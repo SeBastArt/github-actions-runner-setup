@@ -17,6 +17,19 @@ name: select-runner (reusable)
 # Fail-safe: no token, API error or low minutes => fallback runner, so a deploy
 # is never blocked.
 #
+# 2026-10-01: also used by every CI workflow (not only deploys). On 2026-09-28
+# the build/deploy callers correctly switched at 1859/2000 min, but the CI
+# workflows (hard-wired ubuntu-latest, no decider) kept burning minutes past
+# 2000 -> GitHub blocked ALL hosted jobs, including this decider. The 200-min
+# buffer only works if every workflow goes through here. Callers should also
+# use the safety net below for the case the decider itself cannot start.
+#
+# Safety net in the caller (decider blocked/failed => self-hosted):
+#   build:
+#     needs: select-runner
+#     if: ${{ !cancelled() }}
+#     runs-on: ${{ needs.select-runner.outputs.runner || 'production-arm64' }}
+#
 # Usage:
 #   jobs:
 #     select-runner:
@@ -35,6 +48,22 @@ on:
         required: false
         default: production-arm64
         type: string
+      preferred-runner:
+        # CI jobs that today run on ubuntu-latest (x64 tooling, amd64-only
+        # downloads) pass ubuntu-latest here, so nothing changes for them while
+        # minutes last; they only move to the fallback near the cap.
+        description: "GitHub-hosted runner label used while included minutes last"
+        required: false
+        default: ubuntu-24.04-arm
+        type: string
+      force-runner:
+        # Manual override (e.g. workflow_dispatch input): skips the billing
+        # check entirely. Used to test the fallback path without a real
+        # spending block, and as an emergency switch.
+        description: "If set, use this runner label unconditionally"
+        required: false
+        default: ""
+        type: string
     secrets:
       gh-billing-token:
         # Bitwarden Secrets Manager machine-account ACCESS TOKEN, same secret as
@@ -43,7 +72,7 @@ on:
         required: false
     outputs:
       runner:
-        description: "ubuntu-24.04-arm or the fallback runner"
+        description: "preferred-runner, force-runner or the fallback runner"
         value: ${{ jobs.select.outputs.runner }}
 
 permissions:
@@ -73,10 +102,15 @@ jobs:
           INCLUDED: "2000" # org plan's included Actions minutes/month
           BUFFER: "200" # switch to the fallback once within this of the cap
           FALLBACK_RUNNER: ${{ inputs.fallback-runner }}
+          PREFERRED_RUNNER: ${{ inputs.preferred-runner }}
+          FORCE_RUNNER: ${{ inputs.force-runner }}
         run: |
           set -euo pipefail
           runner="$FALLBACK_RUNNER"
-          if [ -n "${BILLING_TOKEN:-}" ]; then
+          if [ -n "$FORCE_RUNNER" ]; then
+            runner="$FORCE_RUNNER"
+            echo "force-runner set; skipping billing check -> ${runner}"
+          elif [ -n "${BILLING_TOKEN:-}" ]; then
             Y=$(date -u +%Y); M=$(date -u +%-m)
             resp=$(curl -sfL \
               -H "Authorization: Bearer ${BILLING_TOKEN}" \
@@ -91,7 +125,7 @@ jobs:
             if [ -n "$used" ]; then
               thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
               if awk "BEGIN{exit !($used < $thresh)}"; then
-                runner=ubuntu-24.04-arm
+                runner="$PREFERRED_RUNNER"
               fi
               printf 'Actions minutes used this month: %.0f / %s (buffer %s) -> %s\n' "$used" "$INCLUDED" "$BUFFER" "$runner"
             else

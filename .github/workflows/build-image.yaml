@@ -134,6 +134,10 @@ jobs:
       # BILLING_TOKEN for the next step. Skipped if no token -> self-hosted.
       - name: Fetch billing token (Bitwarden)
         if: env.BWS_TOKEN != ''
+        # Same as select-runner.yaml: a revoked/expired BWS token or a Bitwarden
+        # outage must not fail the build — without BILLING_TOKEN the pick step
+        # falls back to self-hosted.
+        continue-on-error: true
         uses: bitwarden/sm-action@1238aae8fc64b212641190a9227c8a734ab1a793 # v3.0.1
         with:
           access_token: ${{ env.BWS_TOKEN }}
