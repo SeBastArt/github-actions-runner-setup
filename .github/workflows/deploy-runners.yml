@@ -125,6 +125,21 @@ jobs:
           kubectl delete autoscalingrunnerset arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet arm64-runners found"
           kubectl delete autoscalingrunnerset org-arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet org-arm64-runners found"
 
+          # 2026-10-01: Das `helm uninstall arm64-runners` oben entfernt das
+          # AKTUELLE Release (Scale-Set production-arm64). Der ARC-Controller
+          # loescht es asynchron ueber Finalizer (Runner-Sets, Secret, Rollen).
+          # Ohne Warten lief der Neu-Install in dieses Aufraeumen hinein: der
+          # Controller entfernte das frisch installierte, gleichnamige Set samt
+          # Secret/Rollen, Helm meldete trotzdem "deployed" -> keine Runner
+          # (Run 36881336225). Deshalb hart warten, bis es wirklich weg ist.
+          if ! kubectl wait --for=delete autoscalingrunnerset/production-arm64 \
+               -n actions-runner-system --timeout=300s 2>/dev/null; then
+            if kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system >/dev/null 2>&1; then
+              echo "::error::AutoscalingRunnerSet production-arm64 ist nach 300s noch nicht geloescht - Abbruch statt Race"
+              exit 1
+            fi
+          fi
+
       - name: Login to GitHub Container Registry
         run: |
           echo "${{ secrets.TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
@@ -181,6 +196,29 @@ jobs:
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+      # Harte Pruefung (die folgende Verify-Stufe ist nur informativ und
+      # endet ueberall mit `|| echo`): Scale-Set muss nach dem Install
+      # existieren UND der Listener laufen. Faengt den Finalizer-Race ab,
+      # der am 2026-10-01 das frisch installierte Set wieder entfernt hat.
+      - name: Assert scale set and listener are up
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            sleep 10
+            if kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system >/dev/null 2>&1 \
+               && kubectl get pods -n actions-runner-system --no-headers \
+                  | grep -E '^production-arm64-[a-z0-9]+-listener ' | grep -q ' Running '; then
+              # Nochmal nach 30s: der Race schlug ~15s nach dem Install zu.
+              sleep 30
+              kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system
+              echo "Scale-Set production-arm64 + Listener laufen."
+              exit 0
+            fi
+          done
+          echo "::error::Scale-Set production-arm64 oder Listener nach 240s nicht da"
+          kubectl get autoscalingrunnerset,pods -n actions-runner-system || true
+          exit 1
 
       - name: Verify deployment
         run: |
