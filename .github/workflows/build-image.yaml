@@ -184,7 +184,11 @@ jobs:
 
   build:
     needs: select-runner
-    runs-on: ${{ needs.select-runner.outputs.runner }}
+    # Sicherheitsnetz (2026-10-01): select-runner laeuft auf ubuntu-latest.
+    # Bei einer Minuten-Sperre startet er nicht -> ohne das hier wuerde der
+    # Build uebersprungen. Dann in-cluster auf dem self-hosted Runner bauen.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.select-runner.outputs.runner || inputs.runner }}
     permissions:
       id-token: write
       contents: read
@@ -192,7 +196,7 @@ jobs:
       # Coalesce: in-cluster path uses step id "run", buildx path uses "buildx".
       digest: ${{ steps.run.outputs.digest || steps.buildx.outputs.digest }}
     env:
-      MODE: ${{ needs.select-runner.outputs.mode }}
+      MODE: ${{ needs.select-runner.outputs.mode || 'incluster' }}
       NS: actions-runner-system
       IMAGE: ${{ inputs.image }}
       VERSION: ${{ inputs.version }}
