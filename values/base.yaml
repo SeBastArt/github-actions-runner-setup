@@ -64,7 +64,7 @@ template:
       # actions-runner + gettext-base/envsubst fuer cosign-installer v4).
       # Upstream-Base-Digest bleibt im Dockerfile gepinnt; dieses Image via
       # build-runner-image.yaml bauen und hier den neuen Digest pinnen.
-      image: ghcr.io/sebastart/actions-runner:latest@sha256:7588e663507817b1a894602c6331a3a52e3551ba7fa4eef38699cbd951ccdefd
+      image: ghcr.io/sebastart/actions-runner:latest@sha256:0531c55951f81783d8e623b894484391240b5313be94289b08241397cc1b7123
       imagePullPolicy: IfNotPresent
       command: ["/home/runner/run.sh"]
       # AUDIT 2026-04-26 TOP-09 Phase 2: Container-Level-Hardening.
