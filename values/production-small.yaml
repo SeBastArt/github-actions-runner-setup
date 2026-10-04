@@ -1,0 +1,67 @@
+# Production overrides fuer die KLEINE Runner-Klasse (Steuer-Jobs).
+# Nur Unterschiede zu base.yaml. Plan: cluster-baseline/runner.md.
+#
+# Wofuer: prepare, sign, deploy (helm/kubectl via OIDC), Publish-/Sync-
+# Schritte per curl. NICHT fuer Builds, Tests oder Trivy-Scans — die laufen
+# ueber select-runner (GitHub-hosted, Fallback `production-arm64`).
+#
+# Warum eigene Klasse: Jeder `production-arm64`-Pod reserviert 1Gi auf
+# node-13. Bei voll gebuchtem Node (2026-10-04: 97 % Requests, ~430Mi frei)
+# hing ein HoneyPal-`prepare` > 30 min Pending, obwohl der Job nur eine
+# Versionsnummer erzeugt (Run 37191876325).
+
+# Eigenes Label, getrennt von `production-arm64` (ARC targeting = Name).
+runnerScaleSetName: "production-arm64-small"
+
+# scale-from-zero wie beim grossen Set. maxRunners steht NUR hier und wird von
+# deploy-runners.yml bewusst nicht per --set ueberschrieben (der Input
+# `runner_replicas` gilt nur fuer das grosse Set). 4 x 256Mi = 1Gi: mehr
+# parallele Steuer-Jobs gibt node-13 nicht her, ohne den Balloon dauerhaft
+# zu verdraengen.
+minRunners: 0
+maxRunners: 4
+
+template:
+  spec:
+    # Wie production.yaml: nur Worker-Node (kein etcd). Eine Lockerung auf die
+    # Control-Plane-Nodes waere ein eigener Eingriff (etcd-fsync, Kyverno
+    # prefer-worker-nodepool) und ist bewusst nicht Teil dieser Klasse.
+    nodeSelector:
+      kubernetes.io/arch: arm64
+      nodepool: worker
+
+    # `containers` ist eine Liste und wird NICHT mit base.yaml gemergt — der
+    # komplette Runner-Container inkl. securityContext muss hier stehen.
+    # Image-Digest im Gleichschritt mit base.yaml und production.yaml bumpen.
+    containers:
+    - name: runner
+      image: ghcr.io/sebastart/actions-runner:latest@sha256:0531c55951f81783d8e623b894484391240b5313be94289b08241397cc1b7123
+      imagePullPolicy: IfNotPresent
+      command: ["/home/runner/run.sh"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      # Messung 2026-10-04 (Prometheus, 14 Tage, 1169 Runner-Pods
+      # `production-arm64`, Working-Set des Containers `runner`):
+      #   Pods mit 2-3 Scrapes (= Kurzlaeufer ~1 min, d. h. Steuer-Jobs):
+      #     n=141, p50 131Mi, p90 254Mi, max 527Mi (RSS p90 128Mi)
+      #   935 Pods mit nur EINEM Scrape stehen bei 5-6Mi — das ist der
+      #   Startzeitpunkt, nicht der Job. Die alte Aussage "6 MiB real" war
+      #   dieses Artefakt und taugt nicht als Dimensionierung.
+      # Request = p90 (256Mi), Limit 1Gi: der beobachtete Ausreisser (527Mi)
+      # haette bei 512Mi schon OOM bedeutet, und Scrape-Abstand verdeckt
+      # kurze Spitzen (helm-Render, cosign). Nachmessen exakt per
+      # `cat /sys/fs/cgroup/memory.peak` als letzter Job-Step.
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+      env:
+      # Steuer-Jobs laufen klassisch im Runner-Pod (kein `container:`-Spec),
+      # siehe production.yaml.
+      - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+        value: "false"

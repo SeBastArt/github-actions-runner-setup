@@ -10,9 +10,14 @@ on:
   workflow_dispatch:
     inputs:
       runner_replicas:
-        description: 'Number of runner replicas'
+        # 2026-10-04: Default 4 -> 1. Gilt nur fuer das GROSSE Set (1Gi/Pod).
+        # Auf node-13 passt real genau ein 1Gi-Runner; jeder weitere wurde ein
+        # Pending-Pod, der den worker-headroom-Balloon blockiert (HoneyPal-CI
+        # 37194906313: 5 Pods, 4 Pending). Mit 1 warten weitere Jobs in der
+        # GitHub-Queue statt im Cluster. Steuer-Jobs laufen auf dem kleinen Set.
+        description: 'maxRunners des grossen Sets production-arm64 (1Gi/Pod)'
         required: true
-        default: 4
+        default: 1
         type: number
   # Kein push-Trigger: ein Runner-Deploy soll bewusst gestartet werden,
   # nicht automatisch bei jedem Workflow-File-Edit. Reine manuelle Kontrolle
@@ -192,7 +197,7 @@ jobs:
             --values ./values/production.yaml \
             --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 10 }} \
+            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 1 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -201,24 +206,53 @@ jobs:
       # endet ueberall mit `|| echo`): Scale-Set muss nach dem Install
       # existieren UND der Listener laufen. Faengt den Finalizer-Race ab,
       # der am 2026-10-01 das frisch installierte Set wieder entfernt hat.
-      - name: Assert scale set and listener are up
+      # 2026-10-04: zweite Runner-Klasse fuer Steuer-Jobs (prepare/sign/deploy),
+      # 256Mi statt 1Gi Request — Plan in cluster-baseline/runner.md.
+      # Bewusst OHNE den Uninstall-/Finalizer-Zyklus des grossen Sets: die
+      # Release ist neu, es gibt keine Altlasten mit kollidierendem Namen, und
+      # ein Uninstall wuerde laufende Deploys anderer Repos abschiessen.
+      # Bewusst OHNE --set-json maxRunners: der Input `runner_replicas` gilt
+      # nur fuer das grosse Set, maxRunners steht in production-small.yaml.
+      # Gleiche Chart-Version wie oben (Controller 0.13.1).
+      - name: Deploy Runner Scale Set (Production, small)
+        run: |
+          helm upgrade --install arm64-runners-small \
+            --namespace actions-runner-system \
+            --version ${{ env.ARC_VERSION }} \
+            --values ./values/base.yaml \
+            --values ./values/production-small.yaml \
+            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
+            --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
+            --wait \
+            --timeout=10m \
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+      - name: Assert scale sets and listeners are up
         run: |
           set -euo pipefail
-          for i in $(seq 1 24); do
-            sleep 10
-            if kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system >/dev/null 2>&1 \
-               && kubectl get pods -n actions-runner-system --no-headers \
-                  | grep -E '^production-arm64-[a-z0-9]+-listener ' | grep -q ' Running '; then
-              # Nochmal nach 30s: der Race schlug ~15s nach dem Install zu.
-              sleep 30
-              kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system
-              echo "Scale-Set production-arm64 + Listener laufen."
-              exit 0
-            fi
-          done
-          echo "::error::Scale-Set production-arm64 oder Listener nach 240s nicht da"
-          kubectl get autoscalingrunnerset,pods -n actions-runner-system || true
-          exit 1
+          check() {
+            local set="$1"
+            for i in $(seq 1 24); do
+              sleep 10
+              # Listener-Name: <scaleset>-<hash>-listener. Der Hash-Teil
+              # enthaelt keinen Bindestrich, deshalb matcht `production-arm64-`
+              # NICHT den Listener von `production-arm64-small`.
+              if kubectl get autoscalingrunnerset "$set" -n actions-runner-system >/dev/null 2>&1 \
+                 && kubectl get pods -n actions-runner-system --no-headers \
+                    | grep -E "^${set}-[a-z0-9]+-listener " | grep -q ' Running '; then
+                # Nochmal nach 30s: der Race schlug ~15s nach dem Install zu.
+                sleep 30
+                kubectl get autoscalingrunnerset "$set" -n actions-runner-system
+                echo "Scale-Set $set + Listener laufen."
+                return 0
+              fi
+            done
+            echo "::error::Scale-Set $set oder Listener nach 240s nicht da"
+            kubectl get autoscalingrunnerset,pods -n actions-runner-system || true
+            return 1
+          }
+          check production-arm64
+          check production-arm64-small
 
       - name: Verify deployment
         run: |
