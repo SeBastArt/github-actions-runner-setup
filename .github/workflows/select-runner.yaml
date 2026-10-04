@@ -39,6 +39,13 @@ name: select-runner (reusable)
 #     deploy:
 #       needs: select-runner
 #       runs-on: ${{ needs.select-runner.outputs.runner }}
+#
+# 2026-10-04: Steuer-Jobs (prepare/deploy) passen `fallback-runner:
+# production-arm64-small` (256Mi statt 1Gi Request) und im Safety-Net
+# `|| 'production-arm64-small'`. Der Default bleibt `production-arm64`, weil
+# CI-/Build-Aufrufer den grossen Runner brauchen. Trivy-Scans laufen nur hier
+# (GitHub-hosted), nie fest auf einem Cluster-Label. Plan:
+# cluster-baseline/runner.md.
 
 on:
   workflow_call:
@@ -124,6 +131,25 @@ jobs:
           access_token: ${{ env.BWS_TOKEN }}
           secrets: |
             f752cc65-9bed-48cd-8431-b46300521a3b > BILLING_TOKEN
+      # 2026-10-04: Drei Versuche reichen nicht. HoneyPal-CI-Run 37194906313
+      # bekam ueber 43 s hinweg dreimal 503, fiel auf production-arm64 und
+      # schickte 5 CI-Jobs gleichzeitig als 1Gi-Pods auf node-13 (einer passt).
+      # Dabei stand der Verbrauch bei 965/2000 — "unbekannt" ist fast nie
+      # "erschoepft". Deshalb merkt sich jede erfolgreiche Abfrage den Stand im
+      # Actions-Cache des AUFRUFENDEN Repos; faellt Bitwarden oder die
+      # Billing-API aus, gilt dieser Stand, sofern er < 24 h alt ist und mit
+      # Sicherheitsabstand unter der Schwelle liegt (s. pick).
+      - name: Month key for billing cache
+        id: month
+        run: echo "ym=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Restore last known billing usage
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .billing-usage
+          # Exakter Key existiert nie; restore-keys liefert den juengsten
+          # Eintrag dieses Monats.
+          key: billing-usage-${{ steps.month.outputs.ym }}-none
+          restore-keys: billing-usage-${{ steps.month.outputs.ym }}-
       - id: pick
         env:
           ORG: ${{ github.repository_owner }}
@@ -132,9 +158,31 @@ jobs:
           FALLBACK_RUNNER: ${{ inputs.fallback-runner }}
           PREFERRED_RUNNER: ${{ inputs.preferred-runner }}
           FORCE_RUNNER: ${{ inputs.force-runner }}
+          # Last-known-Stand: max. Alter und zusaetzlicher Abstand zur
+          # Schwelle. 100 min Abstand > Verbrauch eines CI-Tages ohne Abfrage.
+          LASTKNOWN_MAX_AGE: "86400"
+          LASTKNOWN_MARGIN: "100"
         run: |
           set -euo pipefail
           runner="$FALLBACK_RUNNER"
+          thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
+          # Ohne aktuelle Zahl: zuletzt gemerkten Stand verwenden, wenn frisch
+          # und klar unter der Schwelle. Sonst Fail-safe wie bisher.
+          use_last_known() {
+            [ -f .billing-usage/used ] && [ -f .billing-usage/ts ] || return 1
+            local used ts age
+            used=$(cat .billing-usage/used); ts=$(cat .billing-usage/ts)
+            age=$(( $(date -u +%s) - ts ))
+            if [ "$age" -lt "$LASTKNOWN_MAX_AGE" ] \
+               && awk "BEGIN{exit !($used < $thresh - $LASTKNOWN_MARGIN)}"; then
+              runner="$PREFERRED_RUNNER"
+              printf 'Using last known usage %.0f / %s (%s s old, margin %s) -> %s\n' \
+                "$used" "$INCLUDED" "$age" "$LASTKNOWN_MARGIN" "$runner"
+              return 0
+            fi
+            printf 'Last known usage %.0f (%s s old) not usable; using fallback (%s).\n' "$used" "$age" "$runner"
+            return 1
+          }
           if [ -n "$FORCE_RUNNER" ]; then
             runner="$FORCE_RUNNER"
             echo "force-runner set; skipping billing check -> ${runner}"
@@ -151,15 +199,28 @@ jobs:
                 | select((.unitType|ascii_downcase) | test("minute"))
                 | .quantity ] | add // empty' 2>/dev/null || true)
             if [ -n "$used" ]; then
-              thresh=$(awk "BEGIN{print $INCLUDED-$BUFFER}")
               if awk "BEGIN{exit !($used < $thresh)}"; then
                 runner="$PREFERRED_RUNNER"
               fi
               printf 'Actions minutes used this month: %.0f / %s (buffer %s) -> %s\n' "$used" "$INCLUDED" "$BUFFER" "$runner"
+              mkdir -p .billing-usage
+              printf '%s' "$used" > .billing-usage/used
+              date -u +%s > .billing-usage/ts
+              echo "save=true" >> "$GITHUB_OUTPUT"
             else
-              echo "Billing usage API returned no usable data; using fallback (${runner})."
+              echo "Billing usage API returned no usable data."
+              use_last_known || true
             fi
           else
-            echo "No billing token (GH_BILLING_TOKEN absent); using fallback (${runner})."
+            echo "No billing token (GH_BILLING_TOKEN absent or Bitwarden down)."
+            use_last_known || true
           fi
           echo "runner=$runner" >> "$GITHUB_OUTPUT"
+      - name: Save billing usage
+        if: steps.pick.outputs.save == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .billing-usage
+          # Cache-Keys sind unveraenderlich -> pro Lauf eindeutig.
+          key: billing-usage-${{ steps.month.outputs.ym }}-${{ github.run_id }}-${{ github.run_attempt }}

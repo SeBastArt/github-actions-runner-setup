@@ -15,7 +15,9 @@ runnerScaleSetName: "production-arm64"
 # 6 MiB benutzt. Kosten von minRunners=0: ~30 s Anlaufzeit beim seltenen
 # Fallback-Build (scale-from-zero).
 minRunners: 0
-maxRunners: 10
+# maxRunners wird von deploy-runners.yml per --set-json gesetzt (Input
+# runner_replicas, Default 1 seit 2026-10-04 — auf node-13 passt ein 1Gi-Runner).
+maxRunners: 1
 
 # Production template overrides
 template:

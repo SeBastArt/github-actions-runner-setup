@@ -135,28 +135,25 @@ graph LR
 
 ## ⚙️ Configuration
 
-### Runner Scaling
-```yaml
-# values/production.yaml
-minRunners: 0        # scale-from-zero (Fallback; Builds laufen GitHub-hosted)
-maxRunners: 10       # Maximum concurrent runners
-```
+### Runner-Klassen
 
-### Resource Limits
-```yaml
-# values/production.yaml
-template:
-  spec:
-    containers:
-    - name: runner
-      resources:
-        requests:
-          cpu: "500m"      # 0.5 CPU cores
-          memory: "1Gi"    # 1GB RAM
-        limits:
-          cpu: "4000m"     # 4 CPU cores  
-          memory: "8Gi"    # 8GB RAM
-```
+Zwei Scale-Sets, beide nur auf dem Worker-Node (`nodepool: worker`, node-13),
+beide scale-from-zero. Plan und Begründung: `cluster-baseline/runner.md`.
+
+| Label (`runs-on`) | Helm-Release | Values | Request | Limit | maxRunners | Wofür |
+|---|---|---|---|---|---|---|
+| `production-arm64-small` | `arm64-runners-small` | `production-small.yaml` | 50m / 256Mi | 1 CPU / 1Gi | 4 (Datei) | Steuer-Jobs: `prepare`, `sign`, `deploy`, Publish per curl |
+| `production-arm64` | `arm64-runners` | `production.yaml` | 250m / 1Gi | 4 CPU / 4Gi | 1 (Workflow-Input `runner_replicas`, Default) | Builds/Tests im Fallback von `select-runner` |
+
+Trivy-Scans laufen auf keiner der beiden Klassen, sondern über `select-runner`
+auf GitHub-hosted Runnern.
+
+**Messung 2026-10-04** (Prometheus, 14 Tage, 1169 Pods `production-arm64`,
+Working-Set Container `runner`): Kurzläufer mit 2–3 Scrapes (Steuer-Jobs)
+p50 131Mi, p90 254Mi, max 527Mi; RSS p90 128Mi. 935 Pods mit nur einem Scrape
+stehen bei 5–6Mi — das ist der Pod-Start, nicht der Job, und war die Quelle
+der alten Aussage „Standby-Runner braucht 6 MiB". Exakt nachmessen per
+`cat /sys/fs/cgroup/memory.peak` als letzter Step eines Jobs.
 
 ## 🎯 Use Cases
 
