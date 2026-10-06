@@ -23,7 +23,7 @@
 # ASan/UBSan; auf diesem Runner fehlte ein C++-Compiler ("c++: command not found",
 # HoneyPal PR #198), und sudo ist auch hier gesperrt. g++ zieht libasan/libubsan ueber
 # libgcc-*-dev mit. Ohne das Paket faellt HoneyPal auf zig zurueck, dann ohne Sanitizer.
-FROM ghcr.io/actions/actions-runner:latest@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+FROM ghcr.io/actions/actions-runner:latest@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
 
 USER root
 RUN apt-get update \
