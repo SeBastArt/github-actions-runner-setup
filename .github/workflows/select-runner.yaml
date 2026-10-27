@@ -87,7 +87,16 @@ permissions:
 
 jobs:
   select:
-    runs-on: ubuntu-latest
+    # 2026-10-27: Der Entscheider selbst laeuft im Cluster, nicht hosted.
+    # Hosted kostete jeder Aufruf mind. 1 abgerechnete Minute (Aufrundung pro
+    # Job) -- ueber alle Repos ~19 min/Tag, die den 200-min-Puffer nach dem
+    # Umschalten (1800 am 2026-10-11) bis 2056/2000 am 2026-10-24 aufgefressen
+    # haben. Danach startete GitHub den Entscheider gar nicht mehr, und sein
+    # roter Check blockierte jeden PR, obwohl die eigentlichen Jobs per
+    # Safety-Net auf production-arm64 gruen liefen. Auf der kleinen Klasse
+    # (256Mi) kostet er keine Minuten und kann nie gesperrt werden; curl, jq,
+    # awk bringt das Runner-Image mit.
+    runs-on: production-arm64-small
     env:
       BWS_TOKEN: ${{ secrets.gh-billing-token }}
     outputs:
