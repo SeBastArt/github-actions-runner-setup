@@ -78,6 +78,13 @@ on:
         description: "base64 cluster CA (caller passes vars.K8S_CA_DATA)"
         required: true
         type: string
+      force-runner:
+        # 2026-11-02: Fuer Images, die nur im Cluster bauen koennen (WeLink:
+        # Telerik-NuGet antwortet hosted mit 401). Ueberspringt die Minutenpruefung.
+        description: "If set, build on this runner label unconditionally"
+        required: false
+        default: ""
+        type: string
       audience:
         description: "OIDC audience for the cluster"
         required: false
@@ -133,6 +140,7 @@ jobs:
     with:
       fallback-runner: ${{ inputs.runner }}
       preferred-runner: ubuntu-24.04-arm
+      force-runner: ${{ inputs.force-runner }}
     secrets:
       gh-billing-token: ${{ secrets.gh-billing-token }}
 
