@@ -129,7 +129,7 @@ jobs:
   # logik ein Build nutzt, unabhaengig davon, mit welchem Ref der Caller
   # build-image einbindet. Bei Aenderungen an select-runner.yaml mitziehen.
   select-runner:
-    uses: SeBastArt/github-actions-runner-setup/.github/workflows/select-runner.yaml@8dbcbfdc2ad301552224f48d1a4015f159c211d2
+    uses: SeBastArt/github-actions-runner-setup/.github/workflows/select-runner.yaml@01d64c583e8e768d8fbd90eb57e1c5891990ce62
     with:
       fallback-runner: ${{ inputs.runner }}
       preferred-runner: ubuntu-24.04-arm
