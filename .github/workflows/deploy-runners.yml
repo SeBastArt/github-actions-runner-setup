@@ -15,9 +15,14 @@ on:
         # Pending-Pod, der den worker-headroom-Balloon blockiert (HoneyPal-CI
         # 37194906313: 5 Pods, 4 Pending). Mit 1 warten weitere Jobs in der
         # GitHub-Queue statt im Cluster. Steuer-Jobs laufen auf dem kleinen Set.
+        # 2026-11-21: Default 1 -> 2. node-13 hat seit dem Abbau von WeTrade
+        # (10-22) und dem Parken von weplan (10-31) Luft: 69 % Memory-Requests
+        # mit einem laufenden Runner, mit zweien ~77 %. Mit 1 stauten sich CI
+        # und Deploys ueber alle Repos seriell (Renovate-Welle 11-21). Wenn
+        # wieder Runner-Pods Pending bleiben: zurueck auf 1.
         description: 'maxRunners des grossen Sets production-arm64 (1Gi/Pod)'
         required: true
-        default: 1
+        default: 2
         type: number
   # Kein push-Trigger: ein Runner-Deploy soll bewusst gestartet werden,
   # nicht automatisch bei jedem Workflow-File-Edit. Reine manuelle Kontrolle
@@ -224,7 +229,7 @@ jobs:
             --values ./values/base.yaml \
             --values ./values/production.yaml \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 1 }} \
+            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 2 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
