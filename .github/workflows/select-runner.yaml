@@ -167,6 +167,13 @@ jobs:
           FALLBACK_RUNNER: ${{ inputs.fallback-runner }}
           PREFERRED_RUNNER: ${{ inputs.preferred-runner }}
           FORCE_RUNNER: ${{ inputs.force-runner }}
+          # 2026-11-21: Von Renovate ausgeloeste Laeufe (PR-CI, Rebase,
+          # Deploy-on-Push nach Automerge) nie hosted. Im November hat Renovate
+          # ~65 % der 2000 Hosted-Minuten verbraucht (erste Woche). Renovate
+          # laeuft seit renovate-config#12 als Wochen-Batch Montag frueh, da
+          # wartet niemand auf den Cluster-Runner. triggering_actor statt actor:
+          # ein Re-Run durch Sebastian darf wieder hosted laufen.
+          TRIGGER_ACTOR: ${{ github.triggering_actor || github.actor }}
           # Last-known-Stand: max. Alter und zusaetzlicher Abstand zur
           # Schwelle. 100 min Abstand > Verbrauch eines CI-Tages ohne Abfrage.
           LASTKNOWN_MAX_AGE: "86400"
@@ -195,6 +202,9 @@ jobs:
           if [ -n "$FORCE_RUNNER" ]; then
             runner="$FORCE_RUNNER"
             echo "force-runner set; skipping billing check -> ${runner}"
+          elif [ "$TRIGGER_ACTOR" = "renovate[bot]" ]; then
+            runner="$FALLBACK_RUNNER"
+            echo "triggered by renovate[bot]; never hosted -> ${runner}"
           elif [ -n "${BILLING_TOKEN:-}" ]; then
             Y=$(date -u +%Y); M=$(date -u +%-m)
             resp=$(curl -sfL \
