@@ -131,8 +131,8 @@ rules:
 ```bash
 # Test if you have required permissions
 kubectl auth can-i create namespaces
-kubectl auth can-i create pods --namespace=actions-runner-system
-kubectl auth can-i create secrets --namespace=actions-runner-system
+kubectl auth can-i create pods --namespace=arc-system
+kubectl auth can-i create secrets --namespace=arc-system
 kubectl auth can-i create clusterroles
 ```
 
@@ -145,7 +145,7 @@ When ARC creates the namespace, it should have proper security policies:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: actions-runner-system
+  name: arc-system
   labels:
     # Kubernetes Pod Security Standards
     pod-security.kubernetes.io/enforce: restricted
@@ -161,7 +161,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: arc-runner-network-policy
-  namespace: actions-runner-system
+  namespace: arc-system
 spec:
   podSelector:
     matchLabels:
@@ -295,13 +295,13 @@ fi
 
 # 6. Permissions check
 echo "Checking permissions..."
-if kubectl auth can-i create pods --namespace=actions-runner-system; then
+if kubectl auth can-i create pods --namespace=arc-system; then
   echo "✅ Pod creation permissions available"
 else
   echo "❌ Insufficient permissions for pod creation"
 fi
 
-if kubectl auth can-i create secrets --namespace=actions-runner-system; then
+if kubectl auth can-i create secrets --namespace=arc-system; then
   echo "✅ Secret creation permissions available"
 else
   echo "❌ Insufficient permissions for secret creation"

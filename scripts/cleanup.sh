@@ -13,7 +13,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-NAMESPACE="actions-runner-system"
+# 2026-11: ARC (Controller, Listener, Scale-Sets) liegt in arc-system.
+# NIE auf actions-runner-system zeigen lassen: dort laufen die Image-Builds
+# und die Deployer-Rollen der App-Repos — dieses Skript loescht ALLE Secrets,
+# Rollen und am Ende den Namespace.
+NAMESPACE="arc-system"
 ARC_RELEASE_NAME="arc"
 RUNNERS_RELEASE_NAME="github-runners"
 

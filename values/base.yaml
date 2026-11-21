@@ -1,18 +1,46 @@
 # Base values for GitHub Actions Runner Scale Set (OCI Chart)
 # For use with: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
-# GitHub configuration (set via --set in workflow)
+# GitHub configuration (githubConfigUrl via --set in workflow)
 githubConfigUrl: ""
-githubConfigSecret:
-  github_token: ""
+# 2026-11: GitHub App statt PAT. String-Verweis auf ein vorhandenes Secret im
+# Release-NS (arc-system), angelegt vom Workflow-Schritt "Sync GitHub App
+# credentials" aus den Environment-Secrets ARC_GITHUB_APP_*. Der Chart rendert
+# damit kein eigenes Secret, und die Credentials stehen nicht mehr in den
+# Helm-Release-Values (vorher per --set github_token: Klartext in
+# sh.helm.release.v1.*, Audit E-12).
+githubConfigSecret: arc-github-auth
 
 # Expliziter Verweis auf den bestehenden ARC-Controller-SA — ohne diesen
 # Block rendert der Chart mit `lookup "apps/v1" "Deployment" "" ""` und
 # braucht cluster-scoped "list deployments"-Rechte, die der namespaced
 # arc-runner-deployer nicht hat (F-001 Least-Privilege).
+# 2026-11: Controller liegt in arc-system (vorher actions-runner-system).
 controllerServiceAccount:
-  namespace: actions-runner-system
+  namespace: arc-system
   name: arc-gha-rs-controller
+
+# Listener-Pod (laeuft im Controller-NS arc-system). arc-system steht NICHT in
+# den admission-policies-Ausnahmen; require-capabilities-drop verlangt
+# drop: [ALL]. Das Image ist das Controller-Image (Digest-Pin in
+# cluster-baseline/charts/arc-controller/values.yaml), User 65532 (nonroot).
+# Der Container MUSS `listener` heissen, sonst haengt der Controller ihn als
+# Sidecar an statt die Settings zu mergen.
+listenerTemplate:
+  spec:
+    # Der Merge uebernimmt das Feld blind aus dem Template (Default 30) —
+    # explizit auf den Controller-Default 60 setzen.
+    terminationGracePeriodSeconds: 60
+    securityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+    - name: listener
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
 
 # Runner Scale Set name
 runnerScaleSetName: "arm64-runners"

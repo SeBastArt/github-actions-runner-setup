@@ -43,19 +43,30 @@ git clone https://github.com/YOUR_USERNAME/github-actions-runner-setup.git
 cd github-actions-runner-setup
 ```
 
-### 2. Create Organization Token
-1. Go to **GitHub Organization Settings** → **Developer settings** → **Personal access tokens**
-2. Create token with **admin:org** and **repo** permissions
-3. Save the token securely
+### 2. Create the GitHub App (instead of a PAT)
+Since 2026-11 the runners authenticate as a **GitHub App** — app keys do not
+expire (the former fine-grained PAT expired yearly and took all runners down).
 
-### 3. Configure Repository Secrets
-Go to **Repository Settings** → **Secrets and variables** → **Actions** → **Environment secrets** (production):
+1. **Org Settings → Developer settings → GitHub Apps → New GitHub App**
+2. Webhook: **inactive**. Permissions: **Organization → Self-hosted runners: Read and write**, nothing else
+3. Install the app in the org; the installation ID is in the URL (`.../installations/<ID>`)
+4. **Generate a private key** (`.pem`), store it in the Environment secret below, then delete the local file
+
+### 3. Configure Secrets
+**Environment secrets** (`production`, protected by required approval):
 
 ```
-KUBECONFIG    # Base64-encoded kubeconfig file
-TOKEN         # Your GitHub Organization token
-CONFIG_URL    # https://github.com/YOUR_ORG
+ARC_GITHUB_APP_ID               # numeric App ID
+ARC_GITHUB_APP_INSTALLATION_ID  # numeric installation ID
+ARC_GITHUB_APP_PRIVATE_KEY      # full PEM incl. BEGIN/END lines
 ```
+
+Repository variables `K8S_API_SERVER`, `K8S_CA_DATA` (OIDC kubeconfig, F-004) and
+optionally the secret `CONFIG_URL` (defaults to `https://github.com/wondering-developer`).
+The workflow writes the app credentials into the Secret `arc-github-auth` in
+`arc-system` (server-side apply); Helm only references it by name.
+Background on the namespace split (ARC in `arc-system`, builds in
+`actions-runner-system`): `cluster-baseline/charts/arc-controller/README.md`.
 
 ### 4. Deploy Runners
 1. Go to **Actions** tab → **Deploy Runners** workflow
@@ -83,7 +94,7 @@ jobs:
 
 ```mermaid
 graph LR
-    A[GitHub Repository] --> B[Organization Token]
+    A[GitHub Repository] --> B[GitHub App]
     B --> C[ARC Controller]
     C --> D[ARM64 Runner Pods]
     D --> E[Your Workflows]
@@ -129,7 +140,7 @@ graph LR
 - **No persistent state** - runners destroyed after job completion
 
 ### Access Control
-- **Organization tokens** with minimal required permissions
+- **GitHub App** with a single permission (Self-hosted runners: R/W), no expiring PAT
 - **Kubernetes RBAC** with least-privilege principles
 - **Environment-based secrets** prevent unauthorized access
 
@@ -176,10 +187,10 @@ der alten Aussage „Standby-Runner braucht 6 MiB". Exakt nachmessen per
 ### Runner Not Appearing?
 ```bash
 # Check controller logs
-kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller
+kubectl logs -n arc-system -l app.kubernetes.io/name=actions-runner-controller
 
 # Verify AutoscalingRunnerSet
-kubectl get autoscalingrunnerset -n actions-runner-system
+kubectl get autoscalingrunnerset -n arc-system
 ```
 
 ### Jobs Stuck in Queue?

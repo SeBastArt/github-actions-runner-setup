@@ -24,13 +24,22 @@ on:
   # via `gh workflow run` oder GitHub-UI.
 
 env:
-  HELM_VERSION: "3.13.0"
+  # 2026-11-21: 3.13.0 -> 3.17.3. Seit der `helm registry login` (mit dem
+  # PAT) raus ist, zieht Helm die oeffentlichen ARC-Charts anonym. 3.13.0
+  # haengt dabei einen falschen Scope `repository:user/image:pull` an die
+  # Token-Anfrage, ghcr.io antwortet 403 (Run 44895377851). 3.17.3 ist die
+  # Version, mit der Pull und `helm template` beider Sets lokal verifiziert sind.
+  HELM_VERSION: "3.17.3"
   # Muss zu der Version des ARC-Controllers passen, der cluster-weit läuft
   # (gha-runner-scale-set-controller 0.13.1). Ohne --version holt Helm die
   # latest aus ghcr.io, aktuell 0.14.1 — der 0.13.1 Controller löscht dann
   # den 0.14.1 Scale-Set sofort mit "Autoscaling runner set version doesn't
   # match the build version". Upgrade des Controllers braucht cluster-admin.
   ARC_VERSION: "0.13.1"
+  # 2026-11: Controller, Listener und Scale-Sets liegen in arc-system, getrennt
+  # von den Image-Builds in actions-runner-system (Begruendung:
+  # cluster-baseline/charts/arc-controller/README.md §Namespace-Schnitt).
+  ARC_NAMESPACE: arc-system
 
 # SECURITY: Restricted permissions
 permissions:
@@ -112,124 +121,141 @@ jobs:
       # aktuell ist das aber out-of-scope. Check manuell:
       #   kubectl get pods -n cert-manager
 
-      - name: Clean up old repository-level runners
-        run: |
-          # Remove ALL old installations (different naming conventions)
-          helm uninstall arm64-runners --namespace actions-runner-system || echo "No old arm64-runners found"
-          helm uninstall org-arm64-runners --namespace actions-runner-system || echo "No old org-arm64-runners found"
-          
-          # Wait for cleanup
-          sleep 10
-          
-          # Clean up old resources and remove finalizers if stuck
-          kubectl patch autoscalingrunnerset arm64-runners -n actions-runner-system \
-            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet arm64-runners found"
-          kubectl patch autoscalingrunnerset org-arm64-runners -n actions-runner-system \
-            --type=merge -p '{"metadata":{"finalizers":null}}' || echo "No old AutoscalingRunnerSet org-arm64-runners found"
-          
-          kubectl delete autoscalingrunnerset arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet arm64-runners found"
-          kubectl delete autoscalingrunnerset org-arm64-runners -n actions-runner-system || echo "No old AutoscalingRunnerSet org-arm64-runners found"
+      # 2026-11: Uninstall-/Finalizer-Zyklus und `helm registry login` entfernt.
+      # - Der Uninstall-Zyklus stammte aus der Zeit der Release-Umbenennung
+      #   (arm64-runners -> production-arm64) und hat bei JEDEM Deploy das
+      #   grosse Set abgeschossen. Seit dem Umzug nach arc-system gibt es keine
+      #   Altlasten mit kollidierendem Namen mehr; `helm upgrade --install`
+      #   reicht. Der einmalige Umzug lief manuell mit cluster-admin
+      #   (cluster-baseline/charts/arc-controller/README.md §Umzug).
+      # - Die ARC-OCI-Charts sind oeffentlich, der Pull geht anonym. Der Login
+      #   lief mit secrets.TOKEN (dem abgelaufenen PAT) und waere nach dessen
+      #   Loeschung der erste Bruch gewesen.
 
-          # 2026-10-01: Das `helm uninstall arm64-runners` oben entfernt das
-          # AKTUELLE Release (Scale-Set production-arm64). Der ARC-Controller
-          # loescht es asynchron ueber Finalizer (Runner-Sets, Secret, Rollen).
-          # Ohne Warten lief der Neu-Install in dieses Aufraeumen hinein: der
-          # Controller entfernte das frisch installierte, gleichnamige Set samt
-          # Secret/Rollen, Helm meldete trotzdem "deployed" -> keine Runner
-          # (Run 36881336225). Deshalb hart warten, bis es wirklich weg ist.
-          if ! kubectl wait --for=delete autoscalingrunnerset/production-arm64 \
-               -n actions-runner-system --timeout=300s 2>/dev/null; then
-            if kubectl get autoscalingrunnerset production-arm64 -n actions-runner-system >/dev/null 2>&1; then
-              echo "::error::AutoscalingRunnerSet production-arm64 ist nach 300s noch nicht geloescht - Abbruch statt Race"
+      # GitHub-App-Credentials -> Secret arc-github-auth in arc-system.
+      # Quelle: Environment-Secrets (production) dieses Repos. Bewusst NICHT
+      # aus Bitwarden: der einzige freie Bitwarden-Token (sm-longhorn) liest das
+      # ganze Projekt cluster-infra und muesste dafuer in arc-system liegen, wo
+      # dieser Deployer Secrets lesen darf. Ein App-Key laeuft nicht ab — das
+      # Problem, das der PAT hatte (jaehrlicher Ablauf), loest die App selbst.
+      #
+      # Server-side apply: keine last-applied-Annotation mit dem Key darin.
+      # Werte gehen ueber Dateien in $RUNNER_TEMP (umask 077), nicht ueber die
+      # Kommandozeile (waeren sonst in der Prozessliste sichtbar).
+      #
+      # Der Listener liest die Credentials nur beim Start: der Controller
+      # kopiert sie in <set>-<hash>-listener-config und verwendet ein
+      # vorhandenes Config-Secret wieder; kein Controller beobachtet Secrets.
+      # Bei einer Rotation wird deshalb die AutoscalingListener-CR geloescht
+      # (nicht nur der Pod — der behielte die alte Config); das ARS legt sie
+      # mit den neuen Werten neu an. Das passiert HIER im selben Schritt, nicht
+      # in einem spaeteren: bricht der Lauf danach ab (z. B. helm upgrade),
+      # saehe der naechste Lauf before == after und wuerde nie neu starten.
+      - name: Sync GitHub App credentials
+        env:
+          APP_ID: ${{ secrets.ARC_GITHUB_APP_ID }}
+          APP_INSTALLATION_ID: ${{ secrets.ARC_GITHUB_APP_INSTALLATION_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ARC_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for v in APP_ID APP_INSTALLATION_ID APP_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Environment-Secret fuer $v fehlt (ARC_GITHUB_APP_*)"
               exit 1
             fi
+          done
+          # App-ID: numerische ID oder Client-ID (Iv...); ARC fuehrt sie als
+          # String. Installation-ID parst ARC mit ParseInt -> nur Ziffern.
+          case "$APP_ID" in
+            *[!A-Za-z0-9]*) echo "::error::ARC_GITHUB_APP_ID: nur Buchstaben/Ziffern erwartet"; exit 1 ;;
+          esac
+          case "$APP_INSTALLATION_ID" in
+            *[!0-9]*) echo "::error::ARC_GITHUB_APP_INSTALLATION_ID muss numerisch sein"; exit 1 ;;
+          esac
+          if ! printf '%s' "$APP_PRIVATE_KEY" | grep -q -- '-----BEGIN .*PRIVATE KEY-----'; then
+            echo "::error::ARC_GITHUB_APP_PRIVATE_KEY ist kein PEM-Key"
+            exit 1
           fi
-
-      - name: Login to GitHub Container Registry
-        run: |
-          echo "${{ secrets.TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
-
-      # Der ARC-Controller (gha-runner-scale-set-controller Chart) erzeugt
-      # cluster-scoped ClusterRoles+ClusterRoleBindings und ist damit NICHT
-      # mehr von diesem Workflow verwaltbar — der namespaced arc-runner-deployer
-      # SA darf keine ClusterRoles anfassen (F-001 Least-Privilege).
-      # Der Controller läuft bereits seit 2025-07-30 im Cluster; Upgrades
-      # müssen manuell mit cluster-admin oder über ein zukünftiges
-      # cluster-baseline/charts/arc-controller-Chart erfolgen. Aktueller
-      # Check:
-      #   kubectl get deploy -n actions-runner-system arc-gha-rs-controller
+          umask 077
+          d="$(mktemp -d "$RUNNER_TEMP/arc-auth.XXXXXX")"
+          trap 'rm -rf "$d"' EXIT
+          printf '%s' "$APP_ID" > "$d/github_app_id"
+          printf '%s' "$APP_INSTALLATION_ID" > "$d/github_app_installation_id"
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$d/github_app_private_key"
+          # Nur eine ROTATION (Secret existierte schon, Inhalt anders) startet
+          # die Listener neu; beim Erst-Anlegen gibt es noch keine.
+          before=""
+          if kubectl get secret arc-github-auth -n "$ARC_NAMESPACE" >/dev/null 2>&1; then
+            before="$(kubectl get secret arc-github-auth -n "$ARC_NAMESPACE" \
+              -o jsonpath='{.data}' | sha256sum)"
+          fi
+          kubectl create secret generic arc-github-auth -n "$ARC_NAMESPACE" \
+            --from-file="$d/github_app_id" \
+            --from-file="$d/github_app_installation_id" \
+            --from-file="$d/github_app_private_key" \
+            --dry-run=client -o yaml \
+            | kubectl apply --server-side --field-manager=deploy-runners --force-conflicts -f - >/dev/null
+          after="$(kubectl get secret arc-github-auth -n "$ARC_NAMESPACE" \
+            -o jsonpath='{.data}' | sha256sum)"
+          if [ -z "$before" ]; then
+            echo "Secret arc-github-auth neu angelegt."
+          elif [ "$before" != "$after" ]; then
+            echo "Secret arc-github-auth rotiert, Listener werden neu gestartet."
+            kubectl delete autoscalinglistener --all -n "$ARC_NAMESPACE" --wait=false
+          else
+            echo "Secret arc-github-auth unveraendert."
+          fi
 
       - name: Deploy Runner Scale Set (Production)
         run: |
-          # Deploy production runners with configurable count using values files
-          # WITH Docker-in-Docker for container builds
-          # Kein --create-namespace: der NS actions-runner-system existiert
-          # bereits (seit dem ARC-Controller-Install). Helm fragt den
-          # Namespaces-Endpoint trotzdem cluster-scoped an (create-verb),
-          # was der namespaced arc-runner-deployer nicht darf.
-          # minRunners wird BEWUSST nicht mehr per --set gesetzt: ein --set
-          # schlaegt jede Values-Datei, d. h. eine Aenderung in
-          # values/production.yaml waere hier still wirkungslos geblieben.
-          # Der Wert steht jetzt allein in values/production.yaml (0 =
-          # scale-from-zero, Fallback-Betrieb). maxRunners bleibt am Flag,
-          # weil es bewusst pro Deploy-Run ueber den Input steuerbar ist.
-          #
-          # 2026-09-07: maxRunners MUSS `--set-json` sein, nicht `--set`.
-          # Das Chart vergleicht in autoscalingrunnerset.yaml:128
-          # `gt .Values.minRunners .Values.maxRunners`. `--set` parst 4 als
-          # int64, eine Values-Datei parst `minRunners: 0` als float64 — Go's
-          # `gt` kann die beiden nicht vergleichen und bricht mit
-          # "incompatible types for comparison" ab. Solange BEIDE Werte per
-          # --set kamen (bis 9842e69), fiel das nicht auf; erst das Verschieben
-          # von minRunners in die Values-Datei machte die Typen gemischt.
-          # `--set-json` liefert eine JSON-Zahl (float64) und passt damit zur
-          # Values-Datei. Verifiziert per `helm template`: rendert
-          # minRunners: 0 / maxRunners: 4.
-          # WARNUNG: Der Fehler trat erst beim Rendern auf, also NACHDEM
-          # `helm upgrade --install` die bestehende Release angefasst hatte —
-          # der fehlgeschlagene Lauf hat das AutoscalingRunnerSet mitgerissen.
-          # Ein Deploy dieses Charts ist nicht folgenlos-idempotent; vor
+          # minRunners steht allein in values/production.yaml (ein --set
+          # schluege jede Values-Datei). maxRunners MUSS --set-json sein, nicht
+          # --set: das Chart vergleicht `gt .Values.minRunners .Values.maxRunners`,
+          # --set liefert int64, die Values-Datei float64 -> "incompatible types
+          # for comparison" (2026-09-07). Der Fehler tritt erst beim Rendern
+          # auf, also NACHDEM helm die bestehende Release angefasst hat — vor
           # Aenderungen an den Werten immer erst `helm template` lokal fahren.
+          # githubConfigSecret steht als String-Verweis in values/base.yaml
+          # (arc-github-auth); der Chart rendert dann kein eigenes Secret und
+          # der Key landet nicht in den Helm-Release-Values.
           helm upgrade --install arm64-runners \
-            --namespace actions-runner-system \
+            --namespace "$ARC_NAMESPACE" \
             --version ${{ env.ARC_VERSION }} \
             --values ./values/base.yaml \
             --values ./values/production.yaml \
-            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
             --set-json maxRunners=${{ github.event.inputs.runner_replicas || 1 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
-      # Harte Pruefung (die folgende Verify-Stufe ist nur informativ und
-      # endet ueberall mit `|| echo`): Scale-Set muss nach dem Install
-      # existieren UND der Listener laufen. Faengt den Finalizer-Race ab,
-      # der am 2026-10-01 das frisch installierte Set wieder entfernt hat.
       # 2026-10-04: zweite Runner-Klasse fuer Steuer-Jobs (prepare/sign/deploy),
       # 256Mi statt 1Gi Request — Plan in cluster-baseline/runner.md.
-      # Bewusst OHNE den Uninstall-/Finalizer-Zyklus des grossen Sets: die
-      # Release ist neu, es gibt keine Altlasten mit kollidierendem Namen, und
-      # ein Uninstall wuerde laufende Deploys anderer Repos abschiessen.
       # Bewusst OHNE --set-json maxRunners: der Input `runner_replicas` gilt
       # nur fuer das grosse Set, maxRunners steht in production-small.yaml.
-      # Gleiche Chart-Version wie oben (Controller 0.13.1).
       - name: Deploy Runner Scale Set (Production, small)
         run: |
           helm upgrade --install arm64-runners-small \
-            --namespace actions-runner-system \
+            --namespace "$ARC_NAMESPACE" \
             --version ${{ env.ARC_VERSION }} \
             --values ./values/base.yaml \
             --values ./values/production-small.yaml \
-            --set githubConfigSecret.github_token="${{ secrets.TOKEN }}" \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
+      # Harte Pruefung: Scale-Set muss existieren UND der Listener stabil
+      # laufen (Listener leben im Controller-NS, seit 2026-11 ebenfalls
+      # arc-system). Die zweite Pruefung nach 30 s faengt einen Listener ab,
+      # der kurz "Running" zeigt, aber im 401-Crashloop haengt.
       - name: Assert scale sets and listeners are up
         run: |
           set -euo pipefail
+          listener_running() {
+            kubectl get pods -n "$ARC_NAMESPACE" --no-headers \
+              | grep -E "^${1}-[a-z0-9]+-listener " | grep -q ' Running '
+          }
           check() {
             local set="$1"
             for i in $(seq 1 24); do
@@ -237,18 +263,19 @@ jobs:
               # Listener-Name: <scaleset>-<hash>-listener. Der Hash-Teil
               # enthaelt keinen Bindestrich, deshalb matcht `production-arm64-`
               # NICHT den Listener von `production-arm64-small`.
-              if kubectl get autoscalingrunnerset "$set" -n actions-runner-system >/dev/null 2>&1 \
-                 && kubectl get pods -n actions-runner-system --no-headers \
-                    | grep -E "^${set}-[a-z0-9]+-listener " | grep -q ' Running '; then
-                # Nochmal nach 30s: der Race schlug ~15s nach dem Install zu.
+              if kubectl get autoscalingrunnerset "$set" -n "$ARC_NAMESPACE" >/dev/null 2>&1 \
+                 && listener_running "$set"; then
                 sleep 30
-                kubectl get autoscalingrunnerset "$set" -n actions-runner-system
-                echo "Scale-Set $set + Listener laufen."
-                return 0
+                if listener_running "$set"; then
+                  kubectl get autoscalingrunnerset "$set" -n "$ARC_NAMESPACE"
+                  echo "Scale-Set $set + Listener laufen."
+                  return 0
+                fi
               fi
             done
-            echo "::error::Scale-Set $set oder Listener nach 240s nicht da"
-            kubectl get autoscalingrunnerset,pods -n actions-runner-system || true
+            echo "::error::Scale-Set $set oder Listener nach 240s nicht stabil"
+            kubectl get autoscalingrunnerset,autoscalinglistener,pods -n "$ARC_NAMESPACE" || true
+            kubectl logs -n "$ARC_NAMESPACE" -l app.kubernetes.io/component=runner-scale-set-listener --tail=20 || true
             return 1
           }
           check production-arm64
@@ -256,44 +283,12 @@ jobs:
 
       - name: Verify deployment
         run: |
-          echo "🔍 Checking ARC Controller status..."
-          kubectl get pods -n actions-runner-system
-          
-          echo "📊 Checking AutoscalingRunnerSet (ARC v0.12+ API)..."
-          kubectl get autoscalingrunnerset -n actions-runner-system -o wide || echo "No AutoscalingRunnerSet found yet"
-          
-          echo "🎯 CRITICAL: Checking Runner Installation Name (NEW targeting method)..."
-          kubectl get autoscalingrunnerset arm64-runners -n actions-runner-system -o jsonpath='{.metadata.name}' || echo "arm64-runners installation not found"
-          echo ""
-          echo "Installation details:"
-          kubectl get autoscalingrunnerset arm64-runners -n actions-runner-system -o yaml | grep -E "name:|runnerScaleSetName:" || echo "Installation details not available"
-          
-          echo "🏗️ Automatic Labels (ARC v0.12+ generates these based on runtime):"
-          echo "  - self-hosted (automatic)"
-          echo "  - linux (from OS detection)"
-          echo "  - ARM64 (from nodeSelector: kubernetes.io/arch=arm64)"
-          echo "  - arm64-runners (installation name for targeting)"
-          
-          echo "🔍 Checking EphemeralRunnerSet..."
-          kubectl get ephemeralrunnerset -n actions-runner-system || echo "No EphemeralRunnerSet found yet"
-          
-          echo "📋 Checking Helm release status..."
-          helm status arm64-runners -n actions-runner-system
-          
-          echo "📋 Checking Helm values (no runnerLabels in v0.12+)..."
-          helm get values arm64-runners -n actions-runner-system
-          
-          echo "🔧 Checking all custom resources..."
-          kubectl api-resources | grep actions || echo "ARC CRDs not found"
-          
-          echo "📝 Checking recent events for any issues..."
-          kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' | tail -10
-          
-          echo "⚡ Waiting for runner pods to be ready..."
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=gha-runner-scale-set -n actions-runner-system --timeout=300s || echo "Timeout waiting for runner pods"
+          kubectl get autoscalingrunnerset,autoscalinglistener,ephemeralrunnerset -n "$ARC_NAMESPACE" -o wide || true
+          kubectl get pods -n "$ARC_NAMESPACE" || true
+          helm status arm64-runners -n "$ARC_NAMESPACE" || true
+          helm status arm64-runners-small -n "$ARC_NAMESPACE" || true
+          kubectl get events -n "$ARC_NAMESPACE" --sort-by='.lastTimestamp' | tail -15 || true
 
       # verify-setup.sh entfernt: der namespaced arc-runner-deployer darf
       # keine cluster-scoped Queries (kubectl cluster-info, api-resources,
-      # get nodes) absetzen. Der vorhergehende "Verify deployment"-Step
-      # deckt alle namespaced Checks ab (pods, autoscalingrunnerset,
-      # ephemeralrunnerset, events).
+      # get nodes) absetzen.
