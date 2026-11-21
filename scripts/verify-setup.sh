@@ -39,29 +39,29 @@ else
     print_status 1 "kubectl is not configured or cluster is not reachable"
 fi
 
-# Check if actions-runner-system namespace exists
+# Check if arc-system namespace exists
 print_info "Checking namespace..."
-if kubectl get namespace actions-runner-system > /dev/null 2>&1; then
-    print_success "actions-runner-system namespace exists"
+if kubectl get namespace arc-system > /dev/null 2>&1; then
+    print_success "arc-system namespace exists"
 else
-    print_status 1 "actions-runner-system namespace does not exist"
+    print_status 1 "arc-system namespace does not exist"
 fi
 
 # Check if ARC controller is running
 print_info "Checking ARC Controller..."
-RUNNING_PODS=$(kubectl get pods -n actions-runner-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-TOTAL_PODS=$(kubectl get pods -n actions-runner-system --no-headers 2>/dev/null | wc -l)
+RUNNING_PODS=$(kubectl get pods -n arc-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+TOTAL_PODS=$(kubectl get pods -n arc-system --no-headers 2>/dev/null | wc -l)
 
 if [ "$RUNNING_PODS" -gt 0 ] && [ "$TOTAL_PODS" -gt 0 ]; then
     print_success "ARC Controller is running ($RUNNING_PODS/$TOTAL_PODS pods running)"
     
     # Show pod details
     echo "Pod details:"
-    kubectl get pods -n actions-runner-system
+    kubectl get pods -n arc-system
 else
     if [ "$TOTAL_PODS" -gt 0 ]; then
         print_warning "ARC pods exist but not all are running ($RUNNING_PODS/$TOTAL_PODS)"
-        kubectl get pods -n actions-runner-system
+        kubectl get pods -n arc-system
     else
         print_status 1 "No ARC Controller pods found"
     fi
@@ -83,18 +83,18 @@ print_info "Checking Runner Scale Sets and Labels..."
 SCALE_SETS_FOUND=0
 
 # Try AutoscalingRunnerSet
-if kubectl get autoscalingrunnerset -n actions-runner-system --no-headers > /dev/null 2>&1; then
-    ARS_COUNT=$(kubectl get autoscalingrunnerset -n actions-runner-system --no-headers 2>/dev/null | wc -l)
+if kubectl get autoscalingrunnerset -n arc-system --no-headers > /dev/null 2>&1; then
+    ARS_COUNT=$(kubectl get autoscalingrunnerset -n arc-system --no-headers 2>/dev/null | wc -l)
     if [ "$ARS_COUNT" -gt 0 ]; then
         print_success "AutoscalingRunnerSet found ($ARS_COUNT sets)"
-        kubectl get autoscalingrunnerset -n actions-runner-system
+        kubectl get autoscalingrunnerset -n arc-system
         
         # Check runner labels specifically
         print_info "Checking runner labels in AutoscalingRunnerSet..."
-        for ars in $(kubectl get autoscalingrunnerset -n actions-runner-system -o name); do
+        for ars in $(kubectl get autoscalingrunnerset -n arc-system -o name); do
             echo "Checking labels for $ars:"
-            kubectl get $ars -n actions-runner-system -o jsonpath='{.spec.runnerLabels}' && echo ""
-            if [ -z "$(kubectl get $ars -n actions-runner-system -o jsonpath='{.spec.runnerLabels}')" ]; then
+            kubectl get $ars -n arc-system -o jsonpath='{.spec.runnerLabels}' && echo ""
+            if [ -z "$(kubectl get $ars -n arc-system -o jsonpath='{.spec.runnerLabels}')" ]; then
                 print_warning "No runnerLabels found in $ars spec"
             else
                 print_success "runnerLabels found in $ars"
@@ -105,21 +105,21 @@ if kubectl get autoscalingrunnerset -n actions-runner-system --no-headers > /dev
 fi
 
 # Try EphemeralRunnerSet
-if kubectl get ephemeralrunnerset -n actions-runner-system --no-headers > /dev/null 2>&1; then
-    ERS_COUNT=$(kubectl get ephemeralrunnerset -n actions-runner-system --no-headers 2>/dev/null | wc -l)
+if kubectl get ephemeralrunnerset -n arc-system --no-headers > /dev/null 2>&1; then
+    ERS_COUNT=$(kubectl get ephemeralrunnerset -n arc-system --no-headers 2>/dev/null | wc -l)
     if [ "$ERS_COUNT" -gt 0 ]; then
         print_success "EphemeralRunnerSet found ($ERS_COUNT sets)"
-        kubectl get ephemeralrunnerset -n actions-runner-system
+        kubectl get ephemeralrunnerset -n arc-system
         SCALE_SETS_FOUND=1
     fi
 fi
 
 # Try legacy RunnerScaleSet
-if kubectl get runnerscalesets -n actions-runner-system --no-headers > /dev/null 2>&1; then
-    RSS_COUNT=$(kubectl get runnerscalesets -n actions-runner-system --no-headers 2>/dev/null | wc -l)
+if kubectl get runnerscalesets -n arc-system --no-headers > /dev/null 2>&1; then
+    RSS_COUNT=$(kubectl get runnerscalesets -n arc-system --no-headers 2>/dev/null | wc -l)
     if [ "$RSS_COUNT" -gt 0 ]; then
         print_success "RunnerScaleSet found ($RSS_COUNT sets)"
-        kubectl get runnerscalesets -n actions-runner-system
+        kubectl get runnerscalesets -n arc-system
         SCALE_SETS_FOUND=1
     fi
 fi
@@ -148,12 +148,12 @@ else
 fi
 
 # Show all resources in the namespace
-print_info "All resources in actions-runner-system namespace:"
-kubectl get all -n actions-runner-system 2>/dev/null || echo "No resources found"
+print_info "All resources in arc-system namespace:"
+kubectl get all -n arc-system 2>/dev/null || echo "No resources found"
 
 # Show recent events
-print_info "Recent events in actions-runner-system namespace:"
-kubectl get events -n actions-runner-system --sort-by='.lastTimestamp' 2>/dev/null | tail -5 || echo "No events found"
+print_info "Recent events in arc-system namespace:"
+kubectl get events -n arc-system --sort-by='.lastTimestamp' 2>/dev/null | tail -5 || echo "No events found"
 
 echo ""
 print_success "Setup verification completed!"

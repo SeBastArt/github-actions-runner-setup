@@ -10,13 +10,13 @@ Before diving into specific issues, run these commands to get an overview:
 ```bash
 # Check overall cluster and ARC status
 kubectl cluster-info
-kubectl get all -n actions-runner-system
+kubectl get all -n arc-system
 
 # Check your ARM64 nodes
 kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
 
 # View recent events (most helpful for quick diagnosis)
-kubectl get events -n actions-runner-system --sort-by='.lastTimestamp'
+kubectl get events -n arc-system --sort-by='.lastTimestamp'
 ```
 
 ## Common Issues and Solutions
@@ -30,12 +30,12 @@ kubectl get events -n actions-runner-system --sort-by='.lastTimestamp'
 **Quick Diagnosis:**
 ```bash
 # Check controller status
-kubectl get pods -n actions-runner-system
-kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller
+kubectl get pods -n arc-system
+kubectl logs -n arc-system -l app.kubernetes.io/name=actions-runner-controller
 
 # Check AutoscalingRunnerSet (ARC v0.12+)
-kubectl get autoscalingrunnerset -n actions-runner-system
-kubectl describe autoscalingrunnerset -n actions-runner-system
+kubectl get autoscalingrunnerset -n arc-system
+kubectl describe autoscalingrunnerset -n arc-system
 ```
 
 **Common Causes & Fixes:**
@@ -80,8 +80,8 @@ echo $CONFIG_URL  # Should be https://github.com/YOUR_ORG
 **Diagnosis:**
 ```bash
 # Check pod status and events
-kubectl get pods -n actions-runner-system
-kubectl describe pod <pod-name> -n actions-runner-system
+kubectl get pods -n arc-system
+kubectl describe pod <pod-name> -n arc-system
 
 # Check node resources and architecture
 kubectl get nodes -o wide
@@ -97,10 +97,10 @@ kubectl top nodes
 **Solutions:**
 ```bash
 # Verify ARM64 node selector is working
-kubectl get autoscalingrunnerset -n actions-runner-system -o yaml | grep -A5 nodeSelector
+kubectl get autoscalingrunnerset -n arc-system -o yaml | grep -A5 nodeSelector
 
 # Check if nodes meet resource requirements
-kubectl describe autoscalingrunnerset -n actions-runner-system | grep -A10 "Resources"
+kubectl describe autoscalingrunnerset -n arc-system | grep -A10 "Resources"
 
 # Test image pull manually
 docker pull ghcr.io/actions/actions-runner:latest
@@ -135,7 +135,7 @@ kubectl describe pod <runner-pod> | grep -A10 docker
 
 # Redeploy if missing
 helm upgrade --install production-runners \
-  --namespace actions-runner-system \
+  --namespace arc-system \
   --values ./values/base.yaml \
   --values ./values/production.yaml \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -158,8 +158,8 @@ runs-on: production-arm64  # Must match runnerScaleSetName in values/production.
 **Other Causes:**
 ```bash
 # Check if runners are actually online
-kubectl get autoscalingrunnerset -n actions-runner-system
-kubectl get pods -n actions-runner-system
+kubectl get autoscalingrunnerset -n arc-system
+kubectl get pods -n arc-system
 
 # Verify scaling limits
 kubectl describe autoscalingrunnerset | grep -A5 "Min\|Max"
@@ -178,8 +178,8 @@ kubectl describe autoscalingrunnerset | grep -A5 "Min\|Max"
 # Solution: Explicit controller service account reference
 helm upgrade --install production-runners \
   --set controllerServiceAccount.name="arc-controller-gha-rs-controller" \
-  --set controllerServiceAccount.namespace="actions-runner-system" \
-  --namespace actions-runner-system \
+  --set controllerServiceAccount.namespace="arc-system" \
+  --namespace arc-system \
   --values ./values/base.yaml \
   --values ./values/production.yaml \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -188,7 +188,7 @@ helm upgrade --install production-runners \
 **Values Files Not Applied:**
 ```bash
 # Debug: Check what values are actually applied
-helm get values production-runners -n actions-runner-system
+helm get values production-runners -n arc-system
 
 # Test without installation
 helm template test-release \
@@ -207,8 +207,8 @@ helm template test-release \
 **Diagnosis:**
 ```bash
 # Test connectivity from a runner pod
-kubectl exec -it <runner-pod> -n actions-runner-system -- nslookup github.com
-kubectl exec -it <runner-pod> -n actions-runner-system -- curl -I https://github.com
+kubectl exec -it <runner-pod> -n arc-system -- nslookup github.com
+kubectl exec -it <runner-pod> -n arc-system -- curl -I https://github.com
 
 # Test from cluster (create debug pod)
 kubectl run debug-pod --image=alpine -it --rm -- /bin/sh
@@ -234,10 +234,10 @@ Insufficient cpu
 ```bash
 # Check current resource usage
 kubectl top nodes
-kubectl top pods -n actions-runner-system
+kubectl top pods -n arc-system
 
 # Check quotas
-kubectl describe quota -n actions-runner-system
+kubectl describe quota -n arc-system
 
 # Adjust limits in values/production.yaml
 template:
@@ -262,7 +262,7 @@ If you're experiencing persistent issues:
 ./scripts/cleanup.sh
 
 # 2. Manual namespace cleanup if needed
-kubectl delete namespace actions-runner-system --force --grace-period=0
+kubectl delete namespace arc-system --force --grace-period=0
 
 # 3. Clean up CRDs (careful!)
 kubectl get crd | grep actions | awk '{print $1}' | xargs kubectl delete crd
@@ -277,28 +277,28 @@ kubectl get crd | grep actions | awk '{print $1}' | xargs kubectl delete crd
 # Cluster Overview
 kubectl cluster-info
 kubectl get nodes -o wide
-kubectl get all -n actions-runner-system
+kubectl get all -n arc-system
 
 # Controller Logs
-kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller -f
+kubectl logs -n arc-system -l app.kubernetes.io/name=actions-runner-controller -f
 
 # Runner Logs
-kubectl logs -n actions-runner-system -l app=github-runner -f
+kubectl logs -n arc-system -l app=github-runner -f
 
 # Events (most useful for troubleshooting)
-kubectl get events -n actions-runner-system --sort-by='.lastTimestamp'
+kubectl get events -n arc-system --sort-by='.lastTimestamp'
 
 # Custom Resources (ARC v0.12+)
-kubectl get autoscalingrunnerset -n actions-runner-system -o yaml
-kubectl describe autoscalingrunnerset -n actions-runner-system
+kubectl get autoscalingrunnerset -n arc-system -o yaml
+kubectl describe autoscalingrunnerset -n arc-system
 
 # Resource Usage
 kubectl top nodes
-kubectl top pods -n actions-runner-system
+kubectl top pods -n arc-system
 
 # Helm Status
-helm list -n actions-runner-system
-helm status production-runners -n actions-runner-system
+helm list -n arc-system
+helm status production-runners -n arc-system
 ```
 
 ## Performance Optimization
@@ -358,7 +358,7 @@ When all troubleshooting steps fail:
      level: debug  # instead of info
      format: json  # for structured logs
    ```
-   Then check logs: `kubectl logs -n actions-runner-system -l app.kubernetes.io/name=actions-runner-controller -f`
+   Then check logs: `kubectl logs -n arc-system -l app.kubernetes.io/name=actions-runner-controller -f`
 
 4. **System Events**: `kubectl get events --all-namespaces`
 
