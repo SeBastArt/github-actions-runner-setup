@@ -20,9 +20,14 @@ on:
         # mit einem laufenden Runner, mit zweien ~77 %. Mit 1 stauten sich CI
         # und Deploys ueber alle Repos seriell (Renovate-Welle 11-21). Wenn
         # wieder Runner-Pods Pending bleiben: zurueck auf 1.
+        # 2026-11-23: Default 2 -> 1. Genau das trat ein: nach dem kured-WE 11-22
+        # war node-13 request-seitig voll, Runner und BuildKit-Pods (768Mi je
+        # Build, ebenfalls nodepool=worker) blieben am 11-23 06:02-12:24 UTC
+        # Pending, zwei weatherstation-Push-Laeufe scheiterten. Zwei parallele
+        # Builds brauchen 2 x (1Gi + 768Mi) = 3,6Gi, so viel ist dort nicht frei.
         description: 'maxRunners des grossen Sets production-arm64 (1Gi/Pod)'
         required: true
-        default: 2
+        default: 1
         type: number
   # Kein push-Trigger: ein Runner-Deploy soll bewusst gestartet werden,
   # nicht automatisch bei jedem Workflow-File-Edit. Reine manuelle Kontrolle
@@ -229,7 +234,7 @@ jobs:
             --values ./values/base.yaml \
             --values ./values/production.yaml \
             --set githubConfigUrl="${{ secrets.CONFIG_URL || 'https://github.com/wondering-developer' }}" \
-            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 2 }} \
+            --set-json maxRunners=${{ github.event.inputs.runner_replicas || 1 }} \
             --wait \
             --timeout=10m \
             oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set

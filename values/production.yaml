@@ -16,8 +16,8 @@ runnerScaleSetName: "production-arm64"
 # Fallback-Build (scale-from-zero).
 minRunners: 0
 # maxRunners wird von deploy-runners.yml per --set-json gesetzt (Input
-# runner_replicas, Default 2 seit 2026-11-21, vorher 1 seit 2026-10-04).
-maxRunners: 2
+# runner_replicas, Default 1 seit 2026-11-23; 2 nur 11-21 bis 11-23).
+maxRunners: 1
 
 # Production template overrides
 template:
